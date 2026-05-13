@@ -4,6 +4,91 @@ Newest entry at top. Each entry is a resumable snapshot for a fresh Claude or Co
 
 ---
 
+## 2026-05-14 AEST — ▶ RESUME HERE: ready to start Unit 0 of the knowledge-graph plan
+
+**Runner for next turn:** Claude (Unit 0 + 0.5 are claude-tagged in the plan).
+
+**TL;DR for a fresh session:**
+You are implementing the Obsidian universal knowledge graph plan. All planning, brainstorming, MOC design, schema decisions, and visualisation work is DONE. No implementation code has been written yet. The very next step is Unit 0 — verify Gemma 4 E4B in LM Studio responds to function-calling requests.
+
+### Read these first (in order)
+
+1. **`docs/plans/2026-05-13-001-feat-obsidian-knowledge-graph-beta-plan.md`** — the implementation plan. 9 units. Each unit has an `Execution target:` (claude or codex-delegate). Read the Routing Summary and the unit you're about to execute.
+2. **`docs/brainstorms/2026-05-13-obsidian-knowledge-graph-requirements.md`** — the requirements doc. Read if the plan references a requirement (R1–R15) you need context on.
+3. **`docs/diagrams/knowledge-graph-plan.html`** — visual walkthrough. Useful for orientation; not required.
+
+### Pre-flight checks (do BEFORE Unit 0)
+
+- [ ] **LM Studio installed and Gemma 4 E4B downloaded.** User confirmed download started 2026-05-14 but did not confirm completion. Verify in LM Studio → Discover or My Models that `google/gemma-4-e4b` shows as downloaded.
+- [ ] **Load Gemma 4 E4B in LM Studio's Local Server tab.** Note the exact model identifier string LM Studio shows — this becomes `LM_STUDIO_MODEL` in Unit 4. Start the server (default port 1234).
+- [ ] **Verify `~/Documents/ObsidianVault/Personal/` and `~/Documents/ObsidianVault/Business/` both exist.** Plan assumes both.
+- [ ] **Verify Personal vault's Dataview plugin is installed.** Business vault Dataview: user confirmed it's installed too.
+- [ ] **Confirm the existing `Personal/Meetings Homepage.md` and ~9 Granola notes with `up: "[[Meetings Homepage]]"` are present.** These will be renamed by the legacy rewriter in Unit 7.
+
+### Unresolved structural question — surface to user BEFORE Unit 1
+
+The plan as written has all new classifier code landing in `granolaSync/classify/` while extending `evernote-to-obsidian/scripts/classify_notes.py`. This creates an awkward cross-repo dependency. Two paths:
+
+- **Option A (plan as-written):** Code in granolaSync, imports from evernote-to-obsidian. Means initialising granolaSync as its own git repo first (currently empty GitHub repo, no `.git` locally, same workspace-git issue as before).
+- **Option B (recommended):** Move all new classifier code into `evernote-to-obsidian/scripts/classify/` — same repo as the existing `classify_notes.py` it extends. Only Unit 6 (Granola export schema changes) stays in granolaSync.
+
+Ask the user before starting Unit 1.
+
+### Execution order (from plan §Sequencing)
+
+```
+Unit 0 (claude)  → LM Studio verify
+Unit 0.5 (claude) → Tarball backup of both vaults
+Unit 1 (codex)   → venv + requirements.txt
+Unit 2 (codex)   → frontmatter.py module + tests
+Unit 3 (codex)   → rules_classifier.py (extends classify_notes.py)
+Unit 4 (codex)   → lm_classifier.py (Gemma 4 E4B via OpenAI client)
+Unit 5 (codex)   → classify_vault.py CLI (Stage 0a: Job Hunt folder pilot)
+Unit 6 (codex)   → export_granola.py R2 schema additions
+Unit 7 (claude)  → 11 MOC files in both vaults + legacy up: rewriter
+Unit 8 (claude)  → migrate_vault.py (work notes → Business, personal → Personal flat)
+```
+
+### Critical decisions already locked
+
+- **LLM:** Gemma 4 E4B (Q4_K_M, 6.33 GB) via LM Studio's OpenAI-compatible server (port 1234). NOT Ollama. NOT raw-prompt JSON — use function calling (tool use) for schema-enforced output.
+- **Confidence threshold:** 0.80. Manually calibrated on 80 AWS filenames.
+- **Pilot scope:** Job Hunt folder (~35 notes) FIRST. AWS folder (6,375 notes, ~15h LLM run) SECOND.
+- **Schema fields:** type, org, context, people, tags, project, up, classify_confidence. 15 type values including interview, management, application, career, pattern. Tags include STAR markers and AWS leadership-principle tags.
+- **MOC names are SHORT single words** where possible: `Meetings`, `Technical`, `Personal`, `People`, `Companies`, `Projects`, `Reference`, `Patterns`, `Leadership`. Two-word names only where clarity demands: `Interview Prep`, `Job Hunt`.
+- **End state:** Zero `Evernote/` folders in either vault. All notes flat in vault root, organised by MOCs.
+
+### Environment gotchas (read before running anything)
+
+- **Python:** Homebrew Python 3.14. `pip install` is BLOCKED system-wide (PEP 668). Always use a venv.
+- **`pytest`:** Use bare `pytest` command. Never `python3 -m pytest` (pytest is a Homebrew formula, not in Python site-packages).
+- **iCloud Drive:** Both vaults are under `~/Documents/` which is iCloud-synced. Use atomic writes (`.tmp` + rename) and a 50ms sleep between file writes during bulk classification to avoid triggering sync storms.
+- **macOS Full Disc Access:** The granolaSync LaunchAgent (`com.gilesparnell.granola-watcher.plist`) requires `/opt/homebrew/bin/python3` to have Full Disc Access to write to `~/Documents/ObsidianVault/`. Already granted but worth knowing.
+- **Workspace-level `.git`:** `~/Documents/VSStudio/.git` exists (origin: resume-builder.git). This is a known mess. Inside `evernote-to-obsidian/` the local `.git` takes precedence. granolaSync still has the workspace-level git issue — needs its own `git init` before any Unit 1 work commits there.
+
+### Where things live
+
+| Thing | Path |
+|---|---|
+| Plan | `docs/plans/2026-05-13-001-feat-obsidian-knowledge-graph-beta-plan.md` |
+| Brainstorm / requirements | `docs/brainstorms/2026-05-13-obsidian-knowledge-graph-requirements.md` |
+| Visualisation | `docs/diagrams/knowledge-graph-plan.html` |
+| Project hub | `docs/index.html` (live at <https://gilesparnell.github.io/evernote-to-obsidian/>) |
+| Existing classifier | `scripts/classify_notes.py` (extend, don't rebuild) |
+| Existing test suite | `tests/unit/test_classify_notes.py` |
+| Personal vault | `~/Documents/ObsidianVault/Personal/` |
+| Business vault | `~/Documents/ObsidianVault/Business/` |
+| AWS source notes | `~/Documents/ObsidianVault/Personal/Evernote/notes/AWS/` (6,375 notes) |
+| Job Hunt source notes | `~/Documents/ObsidianVault/Personal/Job Hunt/` (~35 notes — pilot scope) |
+| granolaSync (where Unit 6 lands) | `/Users/gilesparnell/Documents/VSStudio/personal/granolaSync/` |
+| Vault backup destination | `~/Backups/ObsidianVault-pre-classification-<YYYY-MM-DD>.tar.gz` |
+
+### TDD posture
+
+`tdd-first` is mandatory for every unit that produces code. Each unit in the plan specifies test file paths. Write the tests FIRST, confirm RED, then implement. Full test suite must be GREEN before declaring a unit done. The plan's `Verification:` line is the gate.
+
+---
+
 ## 2026-05-14 AEST — Docs site live on GitHub Pages; repos initialised
 
 **Runner:** Claude (infrastructure work)
