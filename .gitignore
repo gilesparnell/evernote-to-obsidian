@@ -1,0 +1,48 @@
+# ─── Python ─────────────────────────────────────────────────
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
+
+# ─── macOS ──────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# ─── Editor ─────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── Personal data: never commit Evernote exports or backups ─
+# These contain private notes — public repo MUST NOT include them.
+*.enex
+*.db
+en_backup.*
+evernote-migration/enex-dryrun/
+evernote-migration/enex-fullrun/
+evernote-migration/enex-output/
+evernote-migration/scratch-vault/
+evernote-migration/sync.log
+evernote-migration/en_backup.db
+
+# ─── Build / cache ──────────────────────────────────────────
+dist/
+build/
+*.log
+tmp/
+.tmp/
+
+# ─── Generated review queues from classifier runs ───────────
+classification-review.md
+.classify_checkpoint.json

@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Obsidian Knowledge Graph — Plan Walkthrough</title>
+<link rel="preconnect" href="https://api.fontshare.com">
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@700,900,500&f[]=outfit@400,500,600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:        #0a0c10;
+    --bg-2:      #0f131a;
+    --surface:   rgba(20, 26, 36, 0.6);
+    --border:    rgba(56, 191, 160, 0.18);
+    --border-hi: rgba(56, 191, 160, 0.4);
+    --text:      #e6edf3;
+    --text-dim:  #8b96a6;
+    --text-faint:#5a6577;
+    --teal:      #38bfa0;
+    --teal-soft: rgba(56, 191, 160, 0.12);
+    --amber:     #f5b950;
+    --rose:      #e07c8c;
+    --violet:    #9b8af0;
+  }
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Outfit', system-ui, -apple-system, sans-serif;
+    font-weight: 400;
+    line-height: 1.55;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 800px 600px at 15% 10%, rgba(56, 191, 160, 0.10), transparent 60%),
+      radial-gradient(ellipse 700px 700px at 85% 30%, rgba(155, 138, 240, 0.06), transparent 60%),
+      radial-gradient(ellipse 900px 500px at 50% 95%, rgba(245, 185, 80, 0.05), transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='2' height='2'><circle cx='1' cy='1' r='0.4' fill='%23ffffff' fill-opacity='0.02'/></svg>");
+    pointer-events: none;
+    z-index: 0;
+  }
+  .cursor-glow {
+    position: fixed;
+    width: 400px;
+    height: 400px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(56, 191, 160, 0.08), transparent 70%);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    z-index: 1;
+    transition: opacity 0.2s;
+  }
+
+  main {
+    position: relative;
+    z-index: 2;
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 80px 32px 120px;
+  }
+
+  /* Typography */
+  h1, h2, h3 { font-family: 'Satoshi', system-ui, sans-serif; font-weight: 900; letter-spacing: -0.02em; }
+  h1 { font-size: clamp(2.8rem, 5vw, 4.5rem); line-height: 1.05; }
+  h2 { font-size: clamp(1.8rem, 3vw, 2.6rem); margin-bottom: 12px; }
+  h3 { font-size: 1.4rem; font-weight: 700; margin-bottom: 8px; }
+  h4 { font-family: 'Satoshi', sans-serif; font-weight: 700; font-size: 1.05rem; margin-bottom: 6px; letter-spacing: -0.01em; }
+  p { color: var(--text-dim); margin-bottom: 12px; }
+  .lead { font-size: 1.18rem; color: var(--text); max-width: 760px; }
+  code, pre { font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace; }
+
+  /* Layout */
+  section { margin-top: 100px; }
+  .eyebrow {
+    color: var(--teal);
+    font-family: 'Satoshi', sans-serif;
+    font-weight: 700;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    margin-bottom: 12px;
+  }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    transition: border-color 0.3s, transform 0.3s;
+    position: relative;
+    overflow: hidden;
+  }
+  .card:hover { border-color: var(--border-hi); transform: translateY(-2px); }
+  .card-grid { display: grid; gap: 20px; }
+  .grid-2 { grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+  .grid-3 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .grid-4 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+
+  /* Hero */
+  .hero {
+    margin-top: 24px;
+    padding: 60px 0 40px;
+    text-align: left;
+  }
+  .hero h1 strong { color: var(--teal); font-weight: 900; }
+  .hero .lead { margin-top: 24px; }
+
+  /* Key answer box */
+  .answer-box {
+    background: linear-gradient(135deg, rgba(56, 191, 160, 0.12), rgba(56, 191, 160, 0.03));
+    border: 1px solid var(--border-hi);
+    border-radius: 20px;
+    padding: 40px;
+    margin-top: 40px;
+  }
+  .answer-box h2 { color: var(--teal); }
+  .answer-box .verdict {
+    display: inline-block;
+    font-family: 'Satoshi', sans-serif;
+    font-weight: 900;
+    font-size: 0.85rem;
+    background: var(--teal);
+    color: var(--bg);
+    padding: 4px 12px;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    letter-spacing: 0.05em;
+  }
+
+  /* Code & badges */
+  .badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    padding: 3px 10px;
+    border-radius: 6px;
+    background: var(--teal-soft);
+    color: var(--teal);
+    border: 1px solid var(--border);
+  }
+  .badge.amber { background: rgba(245, 185, 80, 0.1); color: var(--amber); border-color: rgba(245, 185, 80, 0.2); }
+  .badge.rose  { background: rgba(224, 124, 140, 0.1); color: var(--rose); border-color: rgba(224, 124, 140, 0.2); }
+  .badge.violet{ background: rgba(155, 138, 240, 0.1); color: var(--violet); border-color: rgba(155, 138, 240, 0.2); }
+  pre.code {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(56, 191, 160, 0.12);
+    border-radius: 10px;
+    padding: 16px 20px;
+    font-size: 0.85rem;
+    line-height: 1.7;
+    color: var(--text);
+    overflow-x: auto;
+    margin-top: 12px;
+  }
+  pre.code .k { color: var(--violet); }
+  pre.code .s { color: var(--amber); }
+  pre.code .c { color: var(--text-faint); font-style: italic; }
+  pre.code .n { color: var(--teal); }
+
+  /* SVG illustrations */
+  .svg-wrap {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    margin-top: 20px;
+    overflow: hidden;
+  }
+  svg { display: block; width: 100%; height: auto; }
+
+  /* Pipeline visualization */
+  .pipe-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 32px;
+  }
+  .pipe-step {
+    flex: 1;
+    min-width: 180px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    position: relative;
+  }
+  .pipe-step .num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--teal);
+    color: var(--bg);
+    font-family: 'Satoshi', sans-serif;
+    font-weight: 900;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 10px;
+    font-size: 0.9rem;
+  }
+  .pipe-arrow { color: var(--teal); font-size: 1.5rem; font-weight: 900; flex-shrink: 0; }
+
+  /* MOC grid */
+  .moc-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    transition: all 0.3s;
+  }
+  .moc-card:hover { border-color: var(--border-hi); transform: translateY(-2px); }
+  .moc-card .wlink {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--teal);
+    font-size: 0.95rem;
+    margin-bottom: 6px;
+    display: block;
+  }
+  .moc-card .vault {
+    font-size: 0.72rem;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+  }
+  .moc-card .desc { color: var(--text-dim); font-size: 0.9rem; line-height: 1.5; }
+
+  /* Schema table */
+  .schema {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    margin-top: 20px;
+  }
+  .schema-row {
+    display: grid;
+    grid-template-columns: 160px 1fr 1.5fr;
+    padding: 14px 24px;
+    border-bottom: 1px solid rgba(56, 191, 160, 0.08);
+    gap: 16px;
+    align-items: start;
+  }
+  .schema-row:last-child { border-bottom: none; }
+  .schema-row .field { font-family: 'JetBrains Mono', monospace; color: var(--teal); font-size: 0.92rem; }
+  .schema-row .vals  { font-family: 'JetBrains Mono', monospace; color: var(--text); font-size: 0.85rem; }
+  .schema-row .desc  { color: var(--text-dim); font-size: 0.85rem; line-height: 1.5; }
+  .schema-row.header {
+    background: rgba(56, 191, 160, 0.08);
+    font-family: 'Satoshi', sans-serif;
+    font-weight: 700;
+  }
+  .schema-row.header > * { color: var(--text) !important; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; font-family: 'Satoshi', sans-serif !important; }
+
+  /* Timeline */
+  .timeline { position: relative; padding-left: 30px; margin-top: 24px; }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 12px;
+    bottom: 12px;
+    width: 2px;
+    background: linear-gradient(180deg, var(--teal), rgba(56, 191, 160, 0.2));
+  }
+  .tl-item { position: relative; padding-bottom: 28px; }
+  .tl-item::before {
+    content: '';
+    position: absolute;
+    left: -29px;
+    top: 6px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 2px solid var(--teal);
+  }
+  .tl-item.claude::before  { background: var(--teal); }
+  .tl-item.codex::before   { background: var(--violet); border-color: var(--violet); }
+  .tl-item .tl-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+  .tl-item .tl-title {
+    font-family: 'Satoshi', sans-serif;
+    font-weight: 700;
+    font-size: 1.05rem;
+  }
+  .tl-item .tl-desc { color: var(--text-dim); font-size: 0.92rem; }
+
+  /* Before/After */
+  .vault-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+  @media (max-width: 720px) { .vault-compare { grid-template-columns: 1fr; } }
+  .vault-tree {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+    line-height: 1.7;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--text);
+  }
+  .vault-tree.before { border-color: rgba(224, 124, 140, 0.3); }
+  .vault-tree.after  { border-color: rgba(56, 191, 160, 0.3); }
+  .vault-tree .h { color: var(--text-faint); font-style: italic; }
+  .vault-tree .moc { color: var(--teal); font-weight: bold; }
+  .vault-tree .gone { color: var(--rose); text-decoration: line-through; opacity: 0.6; }
+
+  /* Query showcase */
+  .query-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+  @media (max-width: 880px) { .query-grid { grid-template-columns: 1fr; } }
+  .query-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px; }
+  .query-card .question {
+    color: var(--text);
+    font-family: 'Satoshi', sans-serif;
+    font-weight: 700;
+    margin-bottom: 12px;
+    font-size: 1rem;
+  }
+  .query-card .answer-snippet {
+    color: var(--text-dim);
+    font-size: 0.88rem;
+    margin-top: 12px;
+  }
+
+  /* Section heading helper */
+  .section-head { margin-bottom: 28px; max-width: 760px; }
+  .section-head p { margin-top: 12px; }
+
+  /* Footer */
+  footer {
+    margin-top: 120px;
+    padding-top: 40px;
+    border-top: 1px solid var(--border);
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 0.85rem;
+  }
+</style>
+</head>
+<body>
+<div class="cursor-glow" id="cursor-glow"></div>
+<main>
+
+<!-- ─────────────────────────── HERO ─────────────────────────── -->
+<header class="hero">
+  <div class="eyebrow">Plan walkthrough · 2026-05-14</div>
+  <h1>Obsidian <strong>Knowledge<br>Graph</strong> — How it actually works</h1>
+  <p class="lead">
+    A visual answer to your question: <em>"Will all my meetings live in one place?"</em>
+    And how a single MOC + Dataview gives you that view, plus a hundred sliced views
+    you don't have to build by hand.
+  </p>
+</header>
+
+<!-- ─────────────────────────── THE ANSWER ─────────────────────────── -->
+<section>
+  <div class="answer-box">
+    <span class="verdict">YES — AND BETTER</span>
+    <h2>Every meeting → one MOC → infinite slices</h2>
+    <p style="color: var(--text); font-size: 1.05rem; margin-top: 12px;">
+      Every note classified as <span class="badge">type: meeting</span> gets
+      <span class="badge">up: "[[Meetings]]"</span> written to its frontmatter.
+      That single field is the link that makes the note appear in the
+      <span class="badge">[[Meetings]]</span> MOC's inbox automatically.
+      Open Meetings.md → you see every meeting you've ever had, newest first.
+    </p>
+    <p style="color: var(--text); font-size: 1.05rem; margin-top: 16px;">
+      <strong style="color: var(--teal);">Then Dataview goes further.</strong>
+      The same underlying data — those frontmatter fields — can be filtered, grouped,
+      and sorted into any view you can describe. One source of truth, many windows
+      into it. You don't pick between "single page" and "sliced views" — you get
+      both off the same data.
+    </p>
+  </div>
+</section>
+
+<!-- ─────────────────────────── ONE NOTE, MANY VIEWS ─────────────────────────── -->
+<section>
+  <div class="section-head">
+    <div class="eyebrow">The core idea</div>
+    <h2>One note. Many views.</h2>
+    <p>A single classified note becomes visible from every MOC and query that matches its fields. You don't duplicate notes — you slice the same data.</p>
+  </div>
+
+  <div class="svg-wrap">
+    <svg viewBox="0 0 1200 520" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="noteGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#1a2230"/>
+          <stop offset="100%" stop-color="#0e141d"/>
+        </linearGradient>
+        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#38bfa0"/>
+        </marker>
+      </defs>
+
+      <!-- Source note (centre-left) -->
+      <g>
+        <rect x="40" y="160" width="360" height="200" rx="14" fill="url(#noteGrad)" stroke="#38bfa0" stroke-width="2"/>
+        <text x="60" y="195" font-family="Satoshi, sans-serif" font-weight="900" font-size="16" fill="#e6edf3">2024-08-12 — Q3 OLR Calibration</text>
+        <text x="60" y="225" font-family="JetBrains Mono, monospace" font-size="12" fill="#8b96a6">---</text>
+        <text x="60" y="244" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bfa0">type:</text>
+        <text x="115" y="244" font-family="JetBrains Mono, monospace" font-size="12" fill="#e6edf3">meeting</text>
+        <text x="60" y="263" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bfa0">org:</text>
+        <text x="115" y="263" font-family="JetBrains Mono, monospace" font-size="12" fill="#e6edf3">"Amazon"</text>
+        <text x="60" y="282" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bfa0">context:</text>
+        <text x="142" y="282" font-family="JetBrains Mono, monospace" font-size="12" fill="#e6edf3">work</text>
+        <text x="60" y="301" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bfa0">people:</text>
+        <text x="135" y="301" font-family="JetBrains Mono, monospace" font-size="12" fill="#e6edf3">["Jane Smith"]</text>
+        <text x="60" y="320" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bfa0">tags:</text>
+        <text x="115" y="320" font-family="JetBrains Mono, monospace" font-size="12" fill="#e6edf3">[management, olr]</text>
+        <text x="60" y="339" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bfa0">up:</text>
+        <text x="100" y="339" font-family="JetBrains Mono, monospace" font-size="12" fill="#e6edf3">"[[Meetings]]"</text>
+        <text x="60" y="358" font-family="JetBrains Mono, monospace" font-size="12" fill="#8b96a6">---</text>
+      </g>
+
+      <!-- Lines to MOC destinations -->
+      <g stroke="#38bfa0" stroke-width="1.5" fill="none" stroke-dasharray="4,3" opacity="0.6">
+        <path d="M 400 200 C 540 200, 600 80, 760 80" marker-end="url(#arrow)"/>
+        <path d="M 400 230 C 540 230, 600 170, 760 170" marker-end="url(#arrow)"/>
+        <path d="M 400 260 C 540 260, 600 260, 760 260" marker-end="url(#arrow)"/>
+        <path d="M 400 290 C 540 290, 600 350, 760 350" marker-end="url(#arrow)"/>
+        <path d="M 400 320 C 540 320, 600 440, 760 440" marker-end="url(#arrow)"/>
+      </g>
+
+      <!-- Destination MOCs -->
+      <g>
+        <rect x="760" y="50" width="380" height="58" rx="10" fill="rgba(20,26,36,0.6)" stroke="#38bfa0"/>
+        <text x="780" y="78" font-family="Satoshi, sans-serif" font-weight="700" font-size="14" fill="#38bfa0">[[Meetings]]</text>
+        <text x="780" y="98" font-family="Outfit, sans-serif" font-size="12" fill="#8b96a6">via up: — surfaces in inbox query automatically</text>
+      </g>
+      <g>
+        <rect x="760" y="140" width="380" height="58" rx="10" fill="rgba(20,26,36,0.6)" stroke="#38bfa0"/>
+        <text x="780" y="168" font-family="Satoshi, sans-serif" font-weight="700" font-size="14" fill="#38bfa0">[[Amazon]] · Companies MOC</text>
+        <text x="780" y="188" font-family="Outfit, sans-serif" font-size="12" fill="#8b96a6">via org: "Amazon" — Dataview filters by org</text>
+      </g>
+      <g>
+        <rect x="760" y="230" width="380" height="58" rx="10" fill="rgba(20,26,36,0.6)" stroke="#38bfa0"/>
+        <text x="780" y="258" font-family="Satoshi, sans-serif" font-weight="700" font-size="14" fill="#38bfa0">[[People]] · Jane Smith page</text>
+        <text x="780" y="278" font-family="Outfit, sans-serif" font-size="12" fill="#8b96a6">via people: — Dataview FLATTEN per person</text>
+      </g>
+      <g>
+        <rect x="760" y="320" width="380" height="58" rx="10" fill="rgba(20,26,36,0.6)" stroke="#38bfa0"/>
+        <text x="780" y="348" font-family="Satoshi, sans-serif" font-weight="700" font-size="14" fill="#38bfa0">[[Leadership]] MOC</text>
+        <text x="780" y="368" font-family="Outfit, sans-serif" font-size="12" fill="#8b96a6">via tags: management — Dataview tag filter</text>
+      </g>
+      <g>
+        <rect x="760" y="410" width="380" height="58" rx="10" fill="rgba(20,26,36,0.6)" stroke="#38bfa0"/>
+        <text x="780" y="438" font-family="Satoshi, sans-serif" font-weight="700" font-size="14" fill="#38bfa0">Custom: "OLR notes 2024"</text>
+        <text x="780" y="458" font-family="Outfit, sans-serif" font-size="12" fill="#8b96a6">via tags: olr + date — any ad-hoc query you write</text>
+      </g>
+    </svg>
+  </div>
+
+  <p style="margin-top: 20px; color: var(--text-dim);">
+    The same note appears in <strong style="color: var(--teal);">five different views</strong> automatically.
+    No copying, no manual indexing. The frontmatter <em>is</em> the index.
+  </p>
+</section>
+
+<!-- ─────────────────────────── MOC GRID ─────────────────────────── -->
+<section>
+  <div class="section-head">
+    <div class="eyebrow">The MOCs</div>
+    <h2>11 MOCs across two vaults</h2>
+    <p>Each MOC has an inbox (auto-populated by classification) and manually-organised sections you grow over time. Click into any MOC to browse its notes, or use graph view to see the radial structure.</p>
+  </div>
+
+  <div class="card-grid grid-3">
+    <div class="moc-card">
+      <div class="vault">Personal · Both vaults</div>
+      <span class="wlink">[[Home]]</span>
+      <div class="desc">Navigation entry point. Lists every other MOC in this vault.</div>
+    </div>
+    <div class="moc-card">
+      <div class="vault">Personal · Business</div>
+      <span class="wlink">[[Meetings]]</span>
+      <div class="desc">Every meeting note you've ever had. Single inbox view, sliced by date/org/people via Dataview.</div>
+    </div>
+    <div class="moc-card">
+      <div class="vault">Personal · Business</div>
+      <span class="wlink">[[People]]</span>
+      <div class="desc">Index of every person mentioned across all notes. Frequency-ranked.</div>
+    </div>
+    <div class="moc-card">
+      <div class="vault">Personal</div>
+      <span class="wlink">[[Personal]]</span>
+      <div class="desc">Journals, recipes, personal notes. Anything <span class="badge">context: personal</span>.</div>
+    </div>
+    <div class="moc-card">
+      <div class="vault">Personal</div>
+      <span class="wlink">[[Reference]]</span>
+      <div class="desc">How-tos, cheatsheets, reference material.</div>
+    </div>
+    <div class="moc-card">
+      <div class="vault">Personal</div>
+      <span class="wlink">[[Interview Prep]]</span>
+      <div class="desc">STAR stories grouped by competency / AWS LP. Evidence bank for behavioural interviews.</div>
+    </div>
+    <div class="moc-card">
+      <div class="vault">Personal</div>
+      <span class="wlink">[[Job Hunt]]</span>
+      <div class="desc">Active application pipeline. Companies, role research, interview stages, retros.</div>
+    </div>
+    <div class="moc-card">
+      <div class="vault">Personal</div>
+      <span class="wlink">[[Career]]</span>
+      <div class="desc">Resume bullets, achievements timeline, certifications, talks.</div>
+    </div>
+    <div class="moc-card">
+      <div class="vault">Business</div>
+      <span class="wlink">[[Technical]]</span>
+      <div class="desc">Work-specific design docs, RFCs, architecture notes from real projects.</div>
+    </div>
+    <div class="moc-card">
+      <div class="vault">Business</div>
+      <span class="wlink">[[Patterns]]</span>
+      <div class="desc">Reusable architecture knowledge for system-design interviews. CQRS, Saga, etc.</div>
+    </div>
+    <div class="moc-card">
+      <div class="vault">Business</div>
+      <span class="wlink">[[Companies]]</span>
+      <div class="desc">Per-org index: Amazon, T-Systems, TSC, Parnell Systems. Each links to a per-company MOC.</div>
+    </div>
+    <div class="moc-card">
+      <div class="vault">Business</div>
+      <span class="wlink">[[Projects]]</span>
+      <div class="desc">Project-scoped notes grouped by <span class="badge">project:</span> field.</div>
+    </div>
+    <div class="moc-card">
+      <div class="vault">Business</div>
+      <span class="wlink">[[Leadership]]</span>
+      <div class="desc">OLR notes, performance management, management best practices across orgs.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────── RADIAL GRAPH ─────────────────────────── -->
+<section>
+  <div class="section-head">
+    <div class="eyebrow">What your graph view looks like</div>
+    <h2>Notes radiate from MOCs</h2>
+    <p>The <span class="badge">up:</span> field creates a one-way link from every note to its parent MOC. In Obsidian's graph view this produces a radial structure where MOCs become high-connectivity hubs. Today your graph is a hairball — after classification it has shape.</p>
+  </div>
+
+  <div class="svg-wrap">
+    <svg viewBox="0 0 1200 620" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="moc-gradient">
+          <stop offset="0%" stop-color="#38bfa0" stop-opacity="0.4"/>
+          <stop offset="100%" stop-color="#38bfa0" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+
+      <!-- Meetings hub centre-left -->
+      <g>
+        <circle cx="320" cy="310" r="80" fill="url(#moc-gradient)"/>
+        <circle cx="320" cy="310" r="22" fill="#38bfa0" stroke="#0a0c10" stroke-width="3"/>
+        <text x="320" y="350" font-family="Satoshi, sans-serif" font-weight="900" font-size="14" fill="#e6edf3" text-anchor="middle">Meetings</text>
+      </g>
+
+      <!-- Leadership hub centre-right -->
+      <g>
+        <circle cx="880" cy="310" r="80" fill="url(#moc-gradient)"/>
+        <circle cx="880" cy="310" r="22" fill="#38bfa0" stroke="#0a0c10" stroke-width="3"/>
+        <text x="880" y="350" font-family="Satoshi, sans-serif" font-weight="900" font-size="14" fill="#e6edf3" text-anchor="middle">Leadership</text>
+      </g>
+
+      <!-- Tiny note circles radiating from Meetings -->
+      <g fill="#8b96a6">
+        <circle cx="200" cy="200" r="4"/><line x1="200" y1="200" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="180" cy="260" r="4"/><line x1="180" y1="260" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="160" cy="320" r="4"/><line x1="160" y1="320" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="180" cy="380" r="4"/><line x1="180" y1="380" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="220" cy="430" r="4"/><line x1="220" y1="430" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="300" cy="450" r="4"/><line x1="300" y1="450" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="380" cy="430" r="4"/><line x1="380" y1="430" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="420" cy="380" r="4"/><line x1="420" y1="380" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="440" cy="320" r="4"/><line x1="440" y1="320" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="420" cy="260" r="4"/><line x1="420" y1="260" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="380" cy="200" r="4"/><line x1="380" y1="200" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="320" cy="180" r="4"/><line x1="320" y1="180" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="220" cy="160" r="4"/><line x1="220" y1="160" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="450" cy="450" r="4"/><line x1="450" y1="450" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="140" cy="380" r="4"/><line x1="140" y1="380" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="120" cy="240" r="4"/><line x1="120" y1="240" x2="320" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+      </g>
+
+      <!-- Leadership cluster -->
+      <g fill="#8b96a6">
+        <circle cx="760" cy="200" r="4"/><line x1="760" y1="200" x2="880" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="740" cy="260" r="4"/><line x1="740" y1="260" x2="880" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="720" cy="320" r="4"/><line x1="720" y1="320" x2="880" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="740" cy="380" r="4"/><line x1="740" y1="380" x2="880" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="780" cy="430" r="4"/><line x1="780" y1="430" x2="880" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="860" cy="450" r="4"/><line x1="860" y1="450" x2="880" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="940" cy="430" r="4"/><line x1="940" y1="430" x2="880" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="980" cy="380" r="4"/><line x1="980" y1="380" x2="880" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="1000" cy="320" r="4"/><line x1="1000" y1="320" x2="880" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="980" cy="260" r="4"/><line x1="980" y1="260" x2="880" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="940" cy="200" r="4"/><line x1="940" y1="200" x2="880" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+        <circle cx="880" cy="180" r="4"/><line x1="880" y1="180" x2="880" y2="310" stroke="#38bfa0" stroke-opacity="0.3" stroke-width="1"/>
+      </g>
+
+      <!-- Shared note that links to both (cross-cutting) -->
+      <g>
+        <circle cx="600" cy="240" r="6" fill="#f5b950"/>
+        <line x1="600" y1="240" x2="320" y2="310" stroke="#f5b950" stroke-opacity="0.6" stroke-width="1.2"/>
+        <line x1="600" y1="240" x2="880" y2="310" stroke="#f5b950" stroke-opacity="0.6" stroke-width="1.2"/>
+        <text x="600" y="225" font-family="Outfit, sans-serif" font-size="11" fill="#f5b950" text-anchor="middle">cross-cutting: OLR meeting</text>
+      </g>
+
+      <!-- Home node at top centre -->
+      <g>
+        <circle cx="600" cy="60" r="18" fill="#9b8af0" stroke="#0a0c10" stroke-width="3"/>
+        <text x="600" y="95" font-family="Satoshi, sans-serif" font-weight="900" font-size="12" fill="#e6edf3" text-anchor="middle">Home</text>
+        <line x1="600" y1="60" x2="320" y2="310" stroke="#9b8af0" stroke-opacity="0.5" stroke-width="1.5" stroke-dasharray="3,3"/>
+        <line x1="600" y1="60" x2="880" y2="310" stroke="#9b8af0" stroke-opacity="0.5" stroke-width="1.5" stroke-dasharray="3,3"/>
+      </g>
+
+      <!-- Legend -->
+      <g font-family="Outfit, sans-serif" font-size="12" fill="#8b96a6">
+        <circle cx="70" cy="560" r="6" fill="#38bfa0"/>
+        <text x="85" y="565">MOC hub</text>
+        <circle cx="200" cy="560" r="4" fill="#8b96a6"/>
+        <text x="215" y="565">classified note</text>
+        <circle cx="360" cy="560" r="6" fill="#f5b950"/>
+        <text x="375" y="565">cross-linked note (multiple up: targets via tags)</text>
+        <circle cx="730" cy="560" r="6" fill="#9b8af0"/>
+        <text x="745" y="565">navigation root</text>
+      </g>
+    </svg>
+  </div>
+</section>
+
+<!-- ─────────────────────────── EXAMPLE QUERIES ─────────────────────────── -->
+<section>
+  <div class="section-head">
+    <div class="eyebrow">What you'll be able to ask</div>
+    <h2>From "show me all meetings" to anything you can describe</h2>
+    <p>These are real Dataview queries you'll write against the classified data. Each one is two or three lines. None of them require manual curation.</p>
+  </div>
+
+  <div class="query-grid">
+    <div class="query-card">
+      <div class="question">Every meeting I've ever had, newest first</div>
+      <pre class="code"><span class="k">TABLE</span> date, org, people
+<span class="k">FROM</span> <span class="s">""</span>
+<span class="k">WHERE</span> type = <span class="s">"meeting"</span>
+<span class="k">SORT</span> date <span class="k">DESC</span></pre>
+      <p class="answer-snippet">Lives inside the [[Meetings]] MOC's Organised section, or as its own dashboard. Runs over all classified notes in milliseconds.</p>
+    </div>
+
+    <div class="query-card">
+      <div class="question">All 1-on-1s with Jane Smith</div>
+      <pre class="code"><span class="k">LIST</span> date
+<span class="k">FROM</span> <span class="s">""</span>
+<span class="k">WHERE</span> type = <span class="s">"meeting"</span>
+  <span class="k">AND</span> contains(people, <span class="s">"Jane Smith"</span>)
+  <span class="k">AND</span> contains(tags, <span class="s">"1-on-1"</span>)
+<span class="k">SORT</span> date <span class="k">DESC</span></pre>
+      <p class="answer-snippet">Goes on Jane Smith's person page. Auto-populates from the people: field on each meeting note.</p>
+    </div>
+
+    <div class="query-card">
+      <div class="question">STAR stories I haven't told yet</div>
+      <pre class="code"><span class="k">LIST</span>
+<span class="k">FROM</span> <span class="s">""</span>
+<span class="k">WHERE</span> type = <span class="s">"interview"</span>
+  <span class="k">AND</span> contains(tags, <span class="s">"star"</span>)
+  <span class="k">AND</span> !contains(tags, <span class="s">"interview-tested"</span>)</pre>
+      <p class="answer-snippet">Lives in [[Interview Prep]]. The "interview-tested" tag is added manually after you use a story. The query auto-prunes.</p>
+    </div>
+
+    <div class="query-card">
+      <div class="question">Customer Obsession evidence — last 3 years</div>
+      <pre class="code"><span class="k">TABLE</span> file.link, date, org
+<span class="k">FROM</span> <span class="s">""</span>
+<span class="k">WHERE</span> contains(tags, <span class="s">"aws-lp/customer-obsession"</span>)
+  <span class="k">AND</span> date >= date(today) - dur(<span class="s">"3 years"</span>)
+<span class="k">SORT</span> date <span class="k">DESC</span></pre>
+      <p class="answer-snippet">For interview prep — pulls every note tagged with the principle. Sorted by recency so the freshest stories surface first.</p>
+    </div>
+
+    <div class="query-card">
+      <div class="question">Meetings about a project last month</div>
+      <pre class="code"><span class="k">LIST</span>
+<span class="k">FROM</span> <span class="s">""</span>
+<span class="k">WHERE</span> type = <span class="s">"meeting"</span>
+  <span class="k">AND</span> project = <span class="s">"Granola Sync"</span>
+  <span class="k">AND</span> date >= date(today) - dur(<span class="s">"30 days"</span>)
+<span class="k">SORT</span> date <span class="k">DESC</span></pre>
+      <p class="answer-snippet">Drop this on a project page. Stays current automatically.</p>
+    </div>
+
+    <div class="query-card">
+      <div class="question">People I've met most often at Amazon</div>
+      <pre class="code"><span class="k">TABLE</span> length(rows) <span class="k">AS</span> Meetings
+<span class="k">FROM</span> <span class="s">""</span>
+<span class="k">WHERE</span> type = <span class="s">"meeting"</span> <span class="k">AND</span> org = <span class="s">"Amazon"</span>
+<span class="k">FLATTEN</span> people
+<span class="k">GROUP BY</span> people
+<span class="k">SORT</span> length(rows) <span class="k">DESC</span></pre>
+      <p class="answer-snippet">A natural fit for the [[Amazon]] company MOC. Shows your strongest network signals there.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────── SCHEMA ─────────────────────────── -->
+<section>
+  <div class="section-head">
+    <div class="eyebrow">What gets written to each note</div>
+    <h2>The frontmatter schema</h2>
+    <p>These fields are the contract that makes everything else work. Classification writes them; Dataview reads them; you query them.</p>
+  </div>
+
+  <div class="schema">
+    <div class="schema-row header">
+      <div>Field</div>
+      <div>Values</div>
+      <div>What it powers</div>
+    </div>
+    <div class="schema-row">
+      <div class="field">type</div>
+      <div class="vals">meeting | technical | interview | management | application | career | pattern | reference | recipe | journal | personal | note | project | person | company</div>
+      <div class="desc">Routes the note into one of 11 MOCs via UP_MAP. Most powerful single field.</div>
+    </div>
+    <div class="schema-row">
+      <div class="field">org</div>
+      <div class="vals">Amazon | T-Systems | TSC | Parnell Systems | Personal | &lt;other&gt;</div>
+      <div class="desc">Drives per-company MOCs. Lets you slice "meetings at Amazon" or "technical notes from T-Systems".</div>
+    </div>
+    <div class="schema-row">
+      <div class="field">context</div>
+      <div class="vals">work | personal | education</div>
+      <div class="desc">Drives the cross-vault migration in Unit 8. work → Business vault, personal → Personal vault.</div>
+    </div>
+    <div class="schema-row">
+      <div class="field">people</div>
+      <div class="vals">["First Last", ...]</div>
+      <div class="desc">Powers the People MOC and per-person pages. Auto-extracted from body; populated from attendees on Granola notes.</div>
+    </div>
+    <div class="schema-row">
+      <div class="field">tags</div>
+      <div class="vals">["star", "aws-lp/customer-obsession", "olr", "1-on-1", ...]</div>
+      <div class="desc">Obsidian-native tags. Finer-grained than type. Powers tag pages and #-hashtag search.</div>
+    </div>
+    <div class="schema-row">
+      <div class="field">project</div>
+      <div class="vals">"Project Name" (optional)</div>
+      <div class="desc">Powers project-scoped queries inside the Projects MOC.</div>
+    </div>
+    <div class="schema-row">
+      <div class="field">up</div>
+      <div class="vals">"[[MOC Name]]"</div>
+      <div class="desc">The wikilink that makes the note appear in its MOC's inbox query. Derived from type via UP_MAP.</div>
+    </div>
+    <div class="schema-row">
+      <div class="field">classify_confidence</div>
+      <div class="vals">0.0–1.0 (float)</div>
+      <div class="desc">Audit trail. Lets you query "show me low-confidence notes to review".</div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────── PIPELINE ─────────────────────────── -->
+<section>
+  <div class="section-head">
+    <div class="eyebrow">How classification works</div>
+    <h2>Three-tier confidence-gated pipeline</h2>
+    <p>For each note: rules-based scoring runs first (fast, free). If confidence ≥ 0.80, frontmatter is written. If not, Gemma 4 E4B via LM Studio gets a second pass. If still uncertain, the note goes to a review queue for you to classify by hand.</p>
+  </div>
+
+  <div class="pipe-row">
+    <div class="pipe-step">
+      <div class="num">1</div>
+      <h4>Read note</h4>
+      <p style="font-size: 0.86rem; margin-top: 6px;">Strip existing frontmatter. Extract title + body.</p>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-step">
+      <div class="num">2</div>
+      <h4>Rules classifier</h4>
+      <p style="font-size: 0.86rem; margin-top: 6px;">Keyword scoring across 5 type buckets + 4 orgs + tag patterns. Milliseconds. ~66% of notes resolve here.</p>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-step" style="border-color: rgba(245, 185, 80, 0.4);">
+      <div class="num" style="background: var(--amber);">3</div>
+      <h4>LM Studio fallback</h4>
+      <p style="font-size: 0.86rem; margin-top: 6px;">Gemma 4 E4B via function calling. ~33% of notes. ~26s each.</p>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-step">
+      <div class="num">4</div>
+      <h4>Write or queue</h4>
+      <p style="font-size: 0.86rem; margin-top: 6px;">≥0.80 → atomic frontmatter write.<br>&lt;0.80 → review queue.</p>
+    </div>
+  </div>
+
+  <div class="card-grid grid-3" style="margin-top: 36px;">
+    <div class="card">
+      <h4 style="color: var(--teal);">Rules tier</h4>
+      <p style="font-size: 0.92rem;">Pure Python. Scans for known keywords (AWS LP terms, STAR markers, OLR vocab, org names). Extends the existing <code>evernote-to-obsidian/scripts/classify_notes.py</code>. No external calls — runs at full disc speed.</p>
+    </div>
+    <div class="card">
+      <h4 style="color: var(--amber);">LM Studio tier</h4>
+      <p style="font-size: 0.92rem;">OpenAI-compatible local server. Function calling forces the model to emit valid R2 JSON — no parse hacks. Gemma 4 E4B (6.33 GB, full GPU offload on 16 GB Macs) handles the ~33% of notes that rules can't classify confidently.</p>
+    </div>
+    <div class="card">
+      <h4 style="color: var(--rose);">Review queue tier</h4>
+      <p style="font-size: 0.92rem;">A single Markdown file: <code>classification-review.md</code> in the vault root. Wikilinks to each uncertain note, with proposed values and confidence. Open in Obsidian, decide, delete the row. Re-run the pipeline.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────── BEFORE / AFTER ─────────────────────────── -->
+<section>
+  <div class="section-head">
+    <div class="eyebrow">End state</div>
+    <h2>From Evernote hairball to a clean, flat, MOC-anchored vault</h2>
+    <p>Unit 8 migrates every classified note out of the <code>Evernote/</code> subfolder structure. Work notes land in the Business vault. Personal notes stay in Personal but lose the Evernote folder. End state: zero <code>Evernote/</code> directories.</p>
+  </div>
+
+  <div class="vault-compare">
+    <div>
+      <h4 style="color: var(--rose); margin-bottom: 12px;">Before · today</h4>
+      <pre class="vault-tree before">Personal/
+  <span class="h">Evernote/notes/</span>
+    <span class="gone">AWS/</span>              (6,375 notes — contaminated)
+    <span class="gone">T-Systems/</span>        (1,720 notes)
+    <span class="gone">TSC/</span>              (958 notes)
+    <span class="gone">Personal NoteBook/</span> (1,414 notes)
+    <span class="gone">Work - General/</span>   (48 notes)
+    <span class="gone">Cooking/</span>          (40 notes)
+  Job Hunt/
+    [scattered notes]
+  Meetings Homepage.md
+  [9 Granola meeting notes]
+
+Business/
+  [mostly empty]
+</pre>
+    </div>
+    <div>
+      <h4 style="color: var(--teal); margin-bottom: 12px;">After · classified, flat, MOC-anchored</h4>
+      <pre class="vault-tree after"><span class="moc">Personal/</span>
+  <span class="moc">Home.md</span>
+  <span class="moc">Meetings.md</span>        (MOC — all personal meetings)
+  <span class="moc">Personal.md</span>
+  <span class="moc">People.md</span>
+  <span class="moc">Reference.md</span>
+  <span class="moc">Interview Prep.md</span>
+  <span class="moc">Job Hunt.md</span>
+  <span class="moc">Career.md</span>
+  [classified notes, flat]
+
+<span class="moc">Business/</span>
+  <span class="moc">Home.md</span>
+  <span class="moc">Meetings.md</span>        (MOC — all work meetings)
+  <span class="moc">Technical.md</span>
+  <span class="moc">Patterns.md</span>
+  <span class="moc">Companies.md</span>
+  <span class="moc">Amazon.md</span>          (per-org MOC)
+  <span class="moc">T-Systems.md</span>
+  <span class="moc">People.md</span>
+  <span class="moc">Projects.md</span>
+  <span class="moc">Leadership.md</span>
+  [classified notes, flat]
+</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────── TIMELINE ─────────────────────────── -->
+<section>
+  <div class="section-head">
+    <div class="eyebrow">Execution order</div>
+    <h2>9 units, 3 pilot stages</h2>
+    <p>Claude runs the judgement-heavy units (verification, MOC design, migration safety). Codex builds the pipeline code. Each unit has its own tests; classification only starts after Unit 0.5 backs up both vaults.</p>
+  </div>
+
+  <div class="timeline">
+    <div class="tl-item claude">
+      <div class="tl-meta">
+        <span class="tl-title">Unit 0 · LM Studio verification</span>
+        <span class="badge">claude</span>
+      </div>
+      <div class="tl-desc">Load Gemma 4 E4B in LM Studio. Verify function calling via curl smoke test. Note model identifier.</div>
+    </div>
+    <div class="tl-item claude">
+      <div class="tl-meta">
+        <span class="tl-title">Unit 0.5 · Vault backup</span>
+        <span class="badge">claude</span>
+        <span class="badge amber">safety net</span>
+      </div>
+      <div class="tl-desc">Tarball both vaults to <code>~/Backups/</code>. Verify tarball is readable before any writes.</div>
+    </div>
+    <div class="tl-item codex">
+      <div class="tl-meta">
+        <span class="tl-title">Unit 1 · Project venv + dependencies</span>
+        <span class="badge violet">codex</span>
+      </div>
+      <div class="tl-desc">Create <code>granolaSync/classify/</code> package, venv, install <code>openai</code> + <code>PyYAML</code>.</div>
+    </div>
+    <div class="tl-item codex">
+      <div class="tl-meta">
+        <span class="tl-title">Unit 2 · Frontmatter module</span>
+        <span class="badge violet">codex</span>
+      </div>
+      <div class="tl-desc">Safe atomic read/write/is_classified. Tested with 8 unit-test scenarios.</div>
+    </div>
+    <div class="tl-item codex">
+      <div class="tl-meta">
+        <span class="tl-title">Unit 3 · Rules classifier</span>
+        <span class="badge violet">codex</span>
+      </div>
+      <div class="tl-desc">Extended keyword sets — 15 type buckets, 4 orgs, AWS LP tag inference. Tested with realistic examples.</div>
+    </div>
+    <div class="tl-item codex">
+      <div class="tl-meta">
+        <span class="tl-title">Unit 4 · LM Studio classifier</span>
+        <span class="badge violet">codex</span>
+      </div>
+      <div class="tl-desc">OpenAI-compatible client, function calling, schema-enforced JSON. Mocked + live smoke test.</div>
+    </div>
+    <div class="tl-item codex">
+      <div class="tl-meta">
+        <span class="tl-title">Unit 5 · Batch pipeline CLI</span>
+        <span class="badge violet">codex</span>
+        <span class="badge">~15h AWS run</span>
+      </div>
+      <div class="tl-desc">Stage 0a: Job Hunt folder (~35 notes). Stage 0b: AWS folder. Checkpointed, resumable, iCloud-aware.</div>
+    </div>
+    <div class="tl-item codex">
+      <div class="tl-meta">
+        <span class="tl-title">Unit 6 · Granola export schema</span>
+        <span class="badge violet">codex</span>
+      </div>
+      <div class="tl-desc">New Granola meeting notes get the full R2 schema written at export time using attendee metadata.</div>
+    </div>
+    <div class="tl-item claude">
+      <div class="tl-meta">
+        <span class="tl-title">Unit 7 · MOC creation</span>
+        <span class="badge">claude</span>
+      </div>
+      <div class="tl-desc">Create 11 MOCs across both vaults. Legacy <code>up:</code> rewriter for existing Granola notes. Inbox smoke test.</div>
+    </div>
+    <div class="tl-item claude">
+      <div class="tl-meta">
+        <span class="tl-title">Unit 8 · Vault migration</span>
+        <span class="badge">claude</span>
+        <span class="badge rose">irreversible</span>
+      </div>
+      <div class="tl-desc">Move work notes to Business, personal notes to Personal flat. Delete empty Evernote folders.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────────── FOOTER ─────────────────────────── -->
+<footer>
+  <p>Plan: <code>docs/plans/2026-05-13-001-feat-obsidian-knowledge-graph-beta-plan.md</code></p>
+  <p>Requirements: <code>docs/brainstorms/2026-05-13-obsidian-knowledge-graph-requirements.md</code></p>
+  <p style="margin-top: 12px;">Generated 2026-05-14 AEST</p>
+</footer>
+
+</main>
+
+<script>
+  const glow = document.getElementById('cursor-glow');
+  document.addEventListener('mousemove', (e) => {
+    glow.style.left = e.clientX + 'px';
+    glow.style.top = e.clientY + 'px';
+  });
+  document.addEventListener('mouseleave', () => { glow.style.opacity = '0'; });
+  document.addEventListener('mouseenter', () => { glow.style.opacity = '1'; });
+</script>
+</body>
+</html>

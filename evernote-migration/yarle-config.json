@@ -1,0 +1,22 @@
+{
+  "enexSources": [
+    "/Users/gilesparnell/Documents/VSStudio/personal/evernote-to-obsidian/evernote-migration/enex-fullrun"
+  ],
+  "outputDir": "/Users/gilesparnell/Documents/ObsidianVault/Personal/Evernote",
+  "templateFile": "/Users/gilesparnell/Documents/VSStudio/personal/evernote-to-obsidian/evernote-migration/yarle-template.tmpl",
+  "outputFormat": "OBSIDIANMD",
+  "keepOriginalHtml": false,
+  "skipEnexFileNameFromOutputPath": false,
+  "useHashTags": false,
+  "nestedTags": {
+    "separatorInEN": "_",
+    "replaceSeparatorWith": "/"
+  },
+  "keepMetadata": true,
+  "keepCreationTime": true,
+  "keepUpdateTime": true,
+  "useUniqueUnknownFileNames": true,
+  "resourcesDir": "_resources",
+  "urlEncodeFileNamesAndLinks": true,
+  "keepEvernoteLinkIfNoNoteFound": true
+}
