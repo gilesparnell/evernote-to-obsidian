@@ -58,6 +58,14 @@ _FRONTMATTER_STRIP_RE = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)
 _REVIEW_FILENAME = "classification-review.md"
 _CHECKPOINT_FILENAME = ".classify_checkpoint.json"
 
+# Top-level vault directories that the classifier must NEVER touch — protects
+# operator-curated content (the wiki/ folder uses a different schema) and
+# vault backup snapshots from accidental overwrite. Matched against the FIRST
+# path component under the vault, so a file literally named "wiki.md" at the
+# vault root is not affected.
+_SKIP_TOP_LEVEL_EXACT: frozenset[str] = frozenset({"wiki"})
+_SKIP_TOP_LEVEL_PREFIX: tuple[str, ...] = ("Personal-backup",)
+
 
 def up_for_type(type_value: str) -> str:
     """Return the MOC wikilink for a type, falling back to [[Personal]]."""
@@ -70,15 +78,23 @@ def _strip_frontmatter(text: str) -> str:
 
 
 def _iter_md_files(vault: Path, folder: str | None) -> Iterator[Path]:
-    """Yield .md files under vault (or vault/folder), excluding hidden dirs
-    and the review-queue output file itself."""
+    """Yield .md files under vault (or vault/folder), excluding hidden dirs,
+    operator-curated content (wiki/, Personal-backup-*/), and the
+    review-queue output file itself."""
     root = vault if folder is None else vault / folder
     if not root.exists():
         return
     for path in sorted(root.rglob("*.md")):
-        # Skip anything under a hidden directory (.obsidian, .trash, etc.)
         rel_parts = path.relative_to(vault).parts
+        # Hidden anywhere in the path (.obsidian, .trash, etc.)
         if any(part.startswith(".") for part in rel_parts):
+            continue
+        # Top-level operator-curated directories — unconditional skip.
+        if rel_parts and rel_parts[0] in _SKIP_TOP_LEVEL_EXACT:
+            continue
+        if rel_parts and any(
+            rel_parts[0].startswith(p) for p in _SKIP_TOP_LEVEL_PREFIX
+        ):
             continue
         if path.name == _REVIEW_FILENAME:
             continue

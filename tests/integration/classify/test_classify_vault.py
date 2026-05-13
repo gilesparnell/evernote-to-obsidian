@@ -244,3 +244,61 @@ class TestClassifyVault:
             result = classify_vault(vault=tmp_path)
         # Only the real note should be in scope.
         assert result["needs_review"] + result["auto_classified"] == 1
+
+    def test_skips_top_level_wiki_directory(self, tmp_path: Path) -> None:
+        # Hand-curated wiki notes use a different schema (type: concept).
+        # The skip-list must protect them even on a vault-wide run.
+        _write_note(
+            tmp_path / "wiki" / "concepts" / "x.md",
+            frontmatter="title: X\ntype: concept",
+            body="hand-curated wiki content with a different schema",
+        )
+        _write_note(tmp_path / "real.md", body="real note body content")
+        with patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("note", "Personal", confidence=0.2),
+        ):
+            result = classify_vault(vault=tmp_path)
+        # Only real.md should be in scope; wiki/concepts/x.md must be skipped.
+        assert result["needs_review"] + result["auto_classified"] == 1
+
+    def test_skips_personal_backup_directories(self, tmp_path: Path) -> None:
+        # Personal-backup-* directories are vault snapshots — never re-classify.
+        _write_note(
+            tmp_path / "Personal-backup-20260424" / "old-note.md",
+            body="snapshot content from previous backup",
+        )
+        _write_note(tmp_path / "real.md", body="real note body content")
+        with patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("note", "Personal", confidence=0.2),
+        ):
+            result = classify_vault(vault=tmp_path)
+        assert result["needs_review"] + result["auto_classified"] == 1
+
+    def test_evernote_subfolder_processes_normally(self, tmp_path: Path) -> None:
+        # Sanity: the skip-list must not over-block. Evernote/ notes still process.
+        _write_note(
+            tmp_path / "Evernote" / "notes" / "AWS" / "note.md",
+            body="some Evernote-imported note content body",
+        )
+        with patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("note", "Personal", confidence=0.2),
+        ):
+            result = classify_vault(vault=tmp_path)
+        assert result["needs_review"] + result["auto_classified"] == 1
+
+    def test_file_named_wiki_md_at_root_is_processed(self, tmp_path: Path) -> None:
+        # The skip-list matches DIRECTORIES, not filename substrings.
+        # A file literally named wiki.md at vault root should still be classified.
+        _write_note(
+            tmp_path / "wiki.md",
+            body="actually a real note, just happens to be named wiki",
+        )
+        with patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("note", "Personal", confidence=0.2),
+        ):
+            result = classify_vault(vault=tmp_path)
+        assert result["needs_review"] + result["auto_classified"] == 1
