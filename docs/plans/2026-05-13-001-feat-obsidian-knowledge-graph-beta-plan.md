@@ -20,6 +20,18 @@ origin: docs/brainstorms/2026-05-13-obsidian-knowledge-graph-requirements.md
 - **Unit 7** — MOC design requires semantic decisions (inbox query structure, grouping axes, which MOCs go in which vault) that are architectural, not mechanical.
 - **Unit 8** — Vault migration tooling moves 8,000+ files irreversibly; the design of the safety gates and batch confirmation flow is judgement-heavy.
 
+## Path Layout (decided 2026-05-14)
+
+All new classifier code, MOC tooling, and their tests land in **`evernote-to-obsidian/`** — same repo as the existing `scripts/classify_notes.py` they extend. Avoids a cross-repo dependency.
+
+| Code area | Location |
+|---|---|
+| Classifier package (Units 1–5, 7 migrate scripts, 8) | `evernote-to-obsidian/scripts/classify/` |
+| Classifier tests | `evernote-to-obsidian/tests/{unit,integration}/classify/` |
+| MOC reference templates | `evernote-to-obsidian/scripts/classify/moc_templates/` |
+| Granola export schema change (Unit 6 only) | stays in `granolaSync/` — that's where `export_granola.py` lives |
+| MOC `.md` files (Unit 7 output) | written directly into the vaults, not the repo |
+
 ---
 
 ## Problem Frame
@@ -258,22 +270,22 @@ tar -xzf ~/Backups/ObsidianVault-pre-classification-<DATE>.tar.gz -C ~/Documents
 **Dependencies:** Unit 0 (Ollama daemon running, model pulled).
 
 **Files:**
-- `granolaSync/classify/requirements.txt` — new
-- `granolaSync/classify/__init__.py` — new (empty)
-- `granolaSync/classify/venv/` — created by setup, gitignored
+- `evernote-to-obsidian/scripts/classify/requirements.txt` — new
+- `evernote-to-obsidian/scripts/classify/__init__.py` — new (empty)
+- `evernote-to-obsidian/scripts/classify/venv/` — created by setup, gitignored
 
 **Approach:**
 - `requirements.txt` contents: `openai>=1.30`, `PyYAML>=6.0`
-- Setup command: `python3 -m venv granolaSync/classify/venv && granolaSync/classify/venv/bin/pip install -r granolaSync/classify/requirements.txt`
-- Add `granolaSync/classify/venv/` to `.gitignore`
-- The venv Python path for all classifier commands: `granolaSync/classify/venv/bin/python`
+- Setup command: `python3 -m venv evernote-to-obsidian/scripts/classify/venv && evernote-to-obsidian/scripts/classify/venv/bin/pip install -r evernote-to-obsidian/scripts/classify/requirements.txt`
+- Add `evernote-to-obsidian/scripts/classify/venv/` to `.gitignore`
+- The venv Python path for all classifier commands: `evernote-to-obsidian/scripts/classify/venv/bin/python`
 - LM Studio base URL: `http://localhost:1234/v1` (default; no API key required — pass `"lm-studio"` as placeholder)
 
 **Patterns to follow:** Existing project has no venv — this is the first. Follow Homebrew Python 3.14 restriction (never use bare `pip install`).
 
 **Test scenarios:** None (infrastructure only — verified by `openai` import succeeding in Unit 4).
 
-**Verification:** `granolaSync/classify/venv/bin/python -c "import openai, yaml; print('ok')"` exits 0.
+**Verification:** `evernote-to-obsidian/scripts/classify/venv/bin/python -c "import openai, yaml; print('ok')"` exits 0.
 
 ---
 
@@ -287,8 +299,8 @@ tar -xzf ~/Backups/ObsidianVault-pre-classification-<DATE>.tar.gz -C ~/Documents
 **Dependencies:** Unit 1 (venv with PyYAML).
 
 **Files:**
-- `granolaSync/classify/frontmatter.py` — new
-- `granolaSync/tests/unit/classify/test_frontmatter.py` — new
+- `evernote-to-obsidian/scripts/classify/frontmatter.py` — new
+- `evernote-to-obsidian/tests/unit/classify/test_frontmatter.py` — new
 
 **Approach:**
 
@@ -327,7 +339,7 @@ Atomic write pattern: `path.write_text` is NOT atomic on macOS. Write to `path.w
 - `is_classified` returns `True` even when `people` and `project` are absent
 - Atomic write: verify `.tmp` file does not persist after `write_frontmatter` returns
 
-**Verification:** `pytest granolaSync/tests/unit/classify/test_frontmatter.py -v` — all pass.
+**Verification:** `evernote-to-obsidian/scripts/classify/venv/bin/pytest evernote-to-obsidian/tests/unit/classify/test_frontmatter.py -v` — all pass. **Note:** bare `pytest` (Homebrew) cannot import PyYAML — its libexec Python is locked. Use the venv's pytest for any test that imports yaml or openai. `pytest>=8.0` was added to `scripts/classify/requirements.txt` for this reason. See `docs/decisions/decisions.md` (2026-05-14).
 
 ---
 
@@ -341,8 +353,8 @@ Atomic write pattern: `path.write_text` is NOT atomic on macOS. Write to `path.w
 **Dependencies:** Unit 2.
 
 **Files:**
-- `granolaSync/classify/rules_classifier.py` — new (wraps + extends `evernote-to-obsidian/scripts/classify_notes.py`)
-- `granolaSync/tests/unit/classify/test_rules_classifier.py` — new
+- `evernote-to-obsidian/scripts/classify/rules_classifier.py` — new (wraps + extends `evernote-to-obsidian/scripts/classify_notes.py`)
+- `evernote-to-obsidian/tests/unit/classify/test_rules_classifier.py` — new
 
 **Approach:**
 
@@ -438,7 +450,7 @@ PEOPLE_PATTERN = re.compile(
 - Note with "Resume summary: 15 years SRE leadership" → `type: career`
 - Note with "[draft] STAR story about scaling team" → `tags` contains both `"star"` AND `"draft"`
 
-**Verification:** `pytest granolaSync/tests/unit/classify/test_rules_classifier.py -v` — all pass.
+**Verification:** `pytest evernote-to-obsidian/tests/unit/classify/test_rules_classifier.py -v` — all pass.
 
 ---
 
@@ -452,8 +464,8 @@ PEOPLE_PATTERN = re.compile(
 **Dependencies:** Units 0 (LM Studio server verified), 1 (venv with `openai` package), 3 (rules classifier for fallback).
 
 **Files:**
-- `granolaSync/classify/lm_classifier.py` — new
-- `granolaSync/tests/unit/classify/test_lm_classifier.py` — new
+- `evernote-to-obsidian/scripts/classify/lm_classifier.py` — new
+- `evernote-to-obsidian/tests/unit/classify/test_lm_classifier.py` — new
 
 **Approach:**
 
@@ -486,7 +498,7 @@ CLASSIFY_SCHEMA = {
 
 `classify(title: str, body: str, folder_hint: str) -> dict`:
 - Creates `openai.OpenAI(base_url=LM_STUDIO_BASE_URL, api_key="lm-studio")`
-- Calls `client.chat.completions.create()` with `tools=[...]` and `tool_choice={"type":"function", "function":{"name":"classify_note"}}`
+- Calls `client.chat.completions.create()` with `tools=[...]` and `tool_choice="required"` — **LM Studio only accepts string values (`none`/`auto`/`required`) for `tool_choice`; the OpenAI object form (`{"type":"function", "function":{"name":"..."}}`) returns HTTP 400 with `Invalid tool_choice type: 'object'`. Verified during Unit 0 smoke test 2026-05-14.** Since only one tool is exposed, `"required"` is functionally identical to forcing the specific function.
 - Extracts `tool_calls[0].function.arguments` and `json.loads()` — schema enforcement means this always parses
 - On any exception (server down, timeout): returns `{"confidence": 0.0, "reason": "lm-studio unavailable"}` — never raises
 - Maps `"Unknown"` org to `"Personal"` if context is also unknown
@@ -500,11 +512,11 @@ CLASSIFY_SCHEMA = {
 - `confidence` > 1.0 in response → clamp to 1.0
 
 **Live smoke test** (separate file, only runs when LM Studio is reachable):
-- `granolaSync/tests/integration/classify/test_lm_classifier_live.py` — uses `@pytest.mark.integration_live`, skipped by default. Hits real LM Studio with three test prompts (a clear meeting note, a clear STAR story, a low-signal note) and asserts the function-calling response is parseable and matches expected types. Run with `pytest -m integration_live`. Validates that Gemma 4 E4B is honouring the schema enforcement (vs hallucinating in text).
+- `evernote-to-obsidian/tests/integration/classify/test_lm_classifier_live.py` — uses `@pytest.mark.integration_live`, skipped by default. Hits real LM Studio with three test prompts (a clear meeting note, a clear STAR story, a low-signal note) and asserts the function-calling response is parseable and matches expected types. Run with `pytest -m integration_live`. Validates that Gemma 4 E4B is honouring the schema enforcement (vs hallucinating in text).
 
 **Verification:** 
-- `pytest granolaSync/tests/unit/classify/test_lm_classifier.py -v` — mocked tests pass
-- `pytest -m integration_live granolaSync/tests/integration/classify/test_lm_classifier_live.py -v` — live test against running LM Studio passes (run once during Unit 0, then on schema changes)
+- `pytest evernote-to-obsidian/tests/unit/classify/test_lm_classifier.py -v` — mocked tests pass
+- `pytest -m integration_live evernote-to-obsidian/tests/integration/classify/test_lm_classifier_live.py -v` — live test against running LM Studio passes (run once during Unit 0, then on schema changes)
 
 ---
 
@@ -518,12 +530,12 @@ CLASSIFY_SCHEMA = {
 **Dependencies:** Units 2, 3, 4.
 
 **Files:**
-- `granolaSync/classify/classify_vault.py` — new
-- `granolaSync/tests/integration/classify/test_classify_vault.py` — new
+- `evernote-to-obsidian/scripts/classify/classify_vault.py` — new
+- `evernote-to-obsidian/tests/integration/classify/test_classify_vault.py` — new
 
 **Approach:**
 
-CLI: `python granolaSync/classify/classify_vault.py --vault <path> [--folder <subfolder>] [--dry-run] [--limit N]`
+CLI: `python evernote-to-obsidian/scripts/classify/classify_vault.py --vault <path> [--folder <subfolder>] [--dry-run] [--limit N]`
 
 `--folder`: restrict processing to a single subfolder (e.g. `Evernote/notes/AWS`). Pilot order:
 1. **Stage 0a — `--folder "Job Hunt"`** (~35 notes, runs in minutes). Validates the new `interview`/`management`/`application`/`career` types and tag inference work correctly on a small sample where every note should classify clearly. Review the result before scaling.
@@ -591,7 +603,7 @@ UP_MAP = {
 - Notes with body < 50 chars → review queue with "too short" reason
 - Review queue is valid Markdown with correct table format
 
-**Verification:** `pytest granolaSync/tests/integration/classify/test_classify_vault.py -v` — all pass.
+**Verification:** `pytest evernote-to-obsidian/tests/integration/classify/test_classify_vault.py -v` — all pass.
 
 ---
 
@@ -675,7 +687,7 @@ Do NOT change how the frontmatter is written to disc — `export_granola.py` alr
 - `Personal/Job Hunt.md` — new (active application pipeline, role research, interview stages)
 - `Personal/Career.md` — new (resume bullets, achievements timeline, certifications)
 - `Business/Patterns.md` — new (architectural patterns, design knowledge, system-design interview prep)
-- `granolaSync/moc_templates/` — stub templates committed to repo for reference
+- `evernote-to-obsidian/scripts/classify/moc_templates/` — stub templates committed to repo for reference
 
 **Legacy migration step (runs once before MOCs go live):**
 Existing Granola-exported notes already have `up: "[[Meetings Homepage]]"`. After renaming the MOC file to `Meetings.md`, those notes' `up` links will be broken. A one-shot rewriter:
@@ -684,7 +696,7 @@ Existing Granola-exported notes already have `up: "[[Meetings Homepage]]"`. Afte
 find ~/Documents/ObsidianVault/Personal -name '*.md' -exec \
   sed -i '' 's|up: "\[\[Meetings Homepage\]\]"|up: "[[Meetings]]"|g' {} +
 ```
-This is documented but should be added as a small script: `granolaSync/classify/migrate_legacy_up.py` with the same find+sed logic, plus a `--dry-run` flag and a count of rewrites.
+This is documented but should be added as a small script: `evernote-to-obsidian/scripts/classify/migrate_legacy_up.py` with the same find+sed logic, plus a `--dry-run` flag and a count of rewrites.
 
 **MOC anatomy (same pattern for every MOC):**
 
@@ -986,12 +998,12 @@ Business/
 **Dependencies:** Unit 5 (classification confirmed before migration runs).
 
 **Files:**
-- `granolaSync/classify/migrate_vault.py` — new
-- `granolaSync/tests/integration/classify/test_migrate_vault.py` — new
+- `evernote-to-obsidian/scripts/classify/migrate_vault.py` — new
+- `evernote-to-obsidian/tests/integration/classify/test_migrate_vault.py` — new
 
 **Approach:**
 
-CLI: `python granolaSync/classify/migrate_vault.py --personal <path> --business <path> [--dry-run] [--limit N]`
+CLI: `python evernote-to-obsidian/scripts/classify/migrate_vault.py --personal <path> --business <path> [--dry-run] [--limit N]`
 
 Two migration passes in one run:
 
@@ -1031,7 +1043,7 @@ Safety gates:
 - After all Evernote notes migrated → `Personal/Evernote/` directory deleted
 - `migration-log.md` created in Business vault root with correct entries
 
-**Verification:** `pytest granolaSync/tests/integration/classify/test_migrate_vault.py -v` — all pass.
+**Verification:** `pytest evernote-to-obsidian/tests/integration/classify/test_migrate_vault.py -v` — all pass.
 
 ---
 
@@ -1039,12 +1051,12 @@ Safety gates:
 
 | Unit | Test file |
 |------|-----------|
-| 2 | `granolaSync/tests/unit/classify/test_frontmatter.py` |
-| 3 | `granolaSync/tests/unit/classify/test_rules_classifier.py` |
-| 4 | `granolaSync/tests/unit/classify/test_lm_classifier.py` |
-| 5 | `granolaSync/tests/integration/classify/test_classify_vault.py` |
+| 2 | `evernote-to-obsidian/tests/unit/classify/test_frontmatter.py` |
+| 3 | `evernote-to-obsidian/tests/unit/classify/test_rules_classifier.py` |
+| 4 | `evernote-to-obsidian/tests/unit/classify/test_lm_classifier.py` |
+| 5 | `evernote-to-obsidian/tests/integration/classify/test_classify_vault.py` |
 | 6 | `granolaSync/tests/unit/test_export_granola.py` (extend) |
-| 8 | `granolaSync/tests/integration/classify/test_migrate_vault.py` |
+| 8 | `evernote-to-obsidian/tests/integration/classify/test_migrate_vault.py` |
 
 ---
 

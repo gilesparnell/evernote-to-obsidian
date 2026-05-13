@@ -5,6 +5,10 @@ requires-python = ">=3.9"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = ["-m", "not integration_live"]
+markers = [
+    "integration_live: hits a running LM Studio server on :1234; skipped by default (run with: pytest -m integration_live)",
+]
 
 [build-system]
 requires = ["setuptools"]
