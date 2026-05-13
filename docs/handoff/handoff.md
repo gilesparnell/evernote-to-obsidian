@@ -4,6 +4,37 @@ Newest entry at top. Each entry is a resumable snapshot for a fresh Claude or Co
 
 ---
 
+## 2026-05-14 AEST — Docs site live on GitHub Pages; repos initialised
+
+**Runner:** Claude (infrastructure work)
+
+**What changed:**
+- `gilesparnell/evernote-to-obsidian` created on GitHub (PUBLIC).
+- `gilesparnell/granolaSync` created on GitHub (PRIVATE, no content pushed yet).
+- Plan, brainstorm, knowledge-graph-plan.html visualisation, handoff log moved from `granolaSync/docs/` to `evernote-to-obsidian/docs/`.
+- New `evernote-to-obsidian/docs/index.html` project hub page (bento grid, Deep Ocean Tech design).
+- `.gitignore` added to `evernote-to-obsidian/` — excludes all personal Evernote data, venvs, caches.
+- Discovery: `~/Documents/VSStudio/` itself is a single workspace-level git repo (originally resume-builder). `evernote-to-obsidian/` and `granolaSync/` did NOT have their own `.git` directories before today. Resolved by `git init` in each project directory.
+- Initial fresh-history commit pushed to `evernote-to-obsidian/main`.
+- GitHub Pages enabled (serving `/docs` from `main`).
+- Hub site card added at `gilesparnell.github.io/`.
+
+**Live URLs:**
+- Project hub: <https://gilesparnell.github.io/evernote-to-obsidian/>
+- Visualisation: <https://gilesparnell.github.io/evernote-to-obsidian/diagrams/knowledge-graph-plan.html>
+- Repo: <https://github.com/gilesparnell/evernote-to-obsidian>
+
+**What's next:**
+- Resume the implementation plan from Unit 0 (LM Studio Gemma 4 E4B verification). Plan lives at `docs/plans/2026-05-13-001-feat-obsidian-knowledge-graph-beta-plan.md`.
+- granolaSync repo on GitHub is empty — needs its own `git init` + push when ready. Per user instruction, not done today.
+- Workspace-level git at `~/Documents/VSStudio/.git` (origin: resume-builder.git) was untouched after recovery; that's a separate cleanup.
+
+**Gotchas:**
+- `~/Documents/VSStudio/.git` exists at workspace level. Inside subdirectories with their own `.git` (now: evernote-to-obsidian; later: granolaSync once initialised), the inner `.git` wins. Outside those subtrees the workspace git is what's seen.
+- The 4.7 GB `evernote-migration/en_backup.db` and ~3.4 GB of `.enex` exports are gitignored — verify gitignore is intact before any future `git add`.
+
+---
+
 ## 2026-05-14 AEST — Plan updated: Gemma 4 E4B, MOCs, flat vault structure, ready to execute Unit 0
 
 **Runner:** Claude → Codex (plan written; execution starts with Unit 0)
