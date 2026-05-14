@@ -302,3 +302,39 @@ class TestClassifyVault:
         ):
             result = classify_vault(vault=tmp_path)
         assert result["needs_review"] + result["auto_classified"] == 1
+
+
+class TestClassifyVaultProgress:
+    """Unit 2: tqdm progress bar in classify_vault."""
+
+    def test_progress_bar_renders_classifying_label(self, tmp_path: Path, capsys) -> None:
+        # Several notes so tqdm has something to render.
+        for i in range(5):
+            _write_note(tmp_path / f"note-{i:02d}.md", body=f"short body for note {i}")
+        with patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("note", "Personal", confidence=0.2),
+        ):
+            classify_vault(vault=tmp_path)
+        captured = capsys.readouterr()
+        # tqdm writes the description label to its configured stream.
+        assert "Classifying" in (captured.out + captured.err)
+
+    def test_progress_bar_handles_empty_vault(self, tmp_path: Path) -> None:
+        # No .md files at all — tqdm with total=0 must not crash.
+        result = classify_vault(vault=tmp_path)
+        assert result["auto_classified"] == 0
+        assert result["needs_review"] == 0
+
+    def test_progress_bar_handles_all_already_classified(self, tmp_path: Path) -> None:
+        # Every note pre-classified; the iter yields entries but they all skip.
+        _write_note(
+            tmp_path / "already.md",
+            frontmatter=(
+                'type: meeting\norg: Amazon\ncontext: work\nup: "[[Meetings]]"'
+            ),
+            body="AWS standup body",
+        )
+        result = classify_vault(vault=tmp_path)
+        assert result["skipped_already_classified"] == 1
+        assert result["auto_classified"] == 0

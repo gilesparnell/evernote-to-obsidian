@@ -23,10 +23,13 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
+
+from tqdm import tqdm
 
 from scripts.classify import frontmatter as _fm
 from scripts.classify import lm_classifier, rules_classifier
@@ -124,20 +127,24 @@ def _format_review_queue(
     return "\n".join(lines) + "\n"
 
 
-def _classify_note_content(title: str, body: str, folder_hint: str) -> dict[str, Any]:
+def _classify_note_content(
+    title: str, body: str, folder_hint: str
+) -> tuple[dict[str, Any], float | None]:
     """Run rules, then LM Studio fallback when rules confidence is low.
 
-    Keeps whichever classifier produces the higher confidence — never
-    downgrades a confident rules result by overwriting it with a worse LM
-    output.
+    Returns ``(result, lm_latency_seconds)``. lm_latency is None when no LM
+    call fired (rules already confident); otherwise the wall-clock time of
+    the LM call. Used by the progress bar's running average.
     """
     result = rules_classifier.classify(title, body, folder_hint=folder_hint)
     if result["confidence"] >= CONFIDENCE_THRESHOLD:
-        return result
+        return result, None
+    t0 = time.perf_counter()
     lm_result = lm_classifier.classify(title, body, folder_hint)
+    lm_latency = time.perf_counter() - t0
     if lm_result["confidence"] > result["confidence"]:
-        return lm_result
-    return result
+        return lm_result, lm_latency
+    return result, lm_latency
 
 
 def classify_vault(
@@ -155,7 +162,11 @@ def classify_vault(
 
     checkpoint_path = vault / _CHECKPOINT_FILENAME
 
-    for md_path in _iter_md_files(vault, folder):
+    file_list = list(_iter_md_files(vault, folder))
+    lm_latencies: list[float] = []
+    pbar = tqdm(file_list, desc="Classifying", unit="note", file=sys.stdout)
+
+    for md_path in pbar:
         if limit is not None and (auto_classified + len(review_queue)) >= limit:
             break
 
@@ -178,7 +189,9 @@ def classify_vault(
                 "reason": "too short to classify",
             })
         else:
-            result = _classify_note_content(title, body, folder_hint)
+            result, lm_latency = _classify_note_content(title, body, folder_hint)
+            if lm_latency is not None:
+                lm_latencies.append(lm_latency)
             if result["confidence"] >= CONFIDENCE_THRESHOLD:
                 new_fields = {
                     "type": result["type"],
@@ -203,6 +216,14 @@ def classify_vault(
                         "reason", "low confidence from both classifiers"
                     ),
                 })
+
+        lm_avg_str = (
+            f" | lm-avg:{sum(lm_latencies) / len(lm_latencies):.1f}s"
+            if lm_latencies else ""
+        )
+        pbar.set_postfix_str(
+            f"auto:{auto_classified} | review:{len(review_queue)}{lm_avg_str}"
+        )
 
         if not dry_run and len(processed_paths) % checkpoint_interval == 0:
             checkpoint_path.write_text(
