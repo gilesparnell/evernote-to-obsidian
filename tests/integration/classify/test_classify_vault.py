@@ -338,3 +338,64 @@ class TestClassifyVaultProgress:
         result = classify_vault(vault=tmp_path)
         assert result["skipped_already_classified"] == 1
         assert result["auto_classified"] == 0
+
+
+class TestClassifyVaultHeartbeat:
+    """Unit 3: .classify_progress.json heartbeat for non-blocking monitoring."""
+
+    def _run_with_short_notes(self, tmp_path: Path, n: int = 3) -> None:
+        for i in range(n):
+            _write_note(tmp_path / f"note-{i:02d}.md", body=f"short body {i}")
+        with patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("note", "Personal", confidence=0.2),
+        ):
+            classify_vault(vault=tmp_path, checkpoint_interval=2)
+
+    def test_heartbeat_file_written_at_end_of_run(self, tmp_path: Path) -> None:
+        self._run_with_short_notes(tmp_path)
+        heartbeat = tmp_path / ".classify_progress.json"
+        assert heartbeat.exists()
+        data = json.loads(heartbeat.read_text(encoding="utf-8"))
+        assert data["complete"] is True
+
+    def test_heartbeat_atomic_write_leaves_no_tmp_file(self, tmp_path: Path) -> None:
+        self._run_with_short_notes(tmp_path)
+        leftovers = list(tmp_path.glob(".classify_progress.json*.tmp"))
+        assert leftovers == [], f"Found lingering tmp files: {leftovers}"
+
+    def test_heartbeat_json_structure_has_required_keys(self, tmp_path: Path) -> None:
+        self._run_with_short_notes(tmp_path)
+        data = json.loads(
+            (tmp_path / ".classify_progress.json").read_text(encoding="utf-8")
+        )
+        for top_key in ("started_at", "last_updated", "complete", "vault",
+                        "folder", "totals"):
+            assert top_key in data, f"missing top-level key: {top_key}"
+        for total_key in ("scanned", "auto_classified", "needs_review",
+                          "skipped_already_classified", "lm_calls",
+                          "lm_call_avg_seconds"):
+            assert total_key in data["totals"], (
+                f"missing totals key: {total_key}"
+            )
+
+    def test_heartbeat_records_lm_call_count(self, tmp_path: Path) -> None:
+        # Bodies long enough to clear MIN_BODY_LENGTH and lacking any keyword
+        # matches, so they go through the LM path; each call recorded.
+        for i in range(3):
+            _write_note(
+                tmp_path / f"note-{i:02d}.md",
+                body=(
+                    f"this is some lengthy ambiguous filler text number {i} "
+                    "with no classifier matches so the LM path fires"
+                ),
+            )
+        with patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("note", "Personal", confidence=0.2),
+        ):
+            classify_vault(vault=tmp_path)
+        data = json.loads(
+            (tmp_path / ".classify_progress.json").read_text(encoding="utf-8")
+        )
+        assert data["totals"]["lm_calls"] >= 3

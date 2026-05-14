@@ -25,7 +25,7 @@ import json
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -60,6 +60,8 @@ UP_MAP: dict[str, str] = {
 _FRONTMATTER_STRIP_RE = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)
 _REVIEW_FILENAME = "classification-review.md"
 _CHECKPOINT_FILENAME = ".classify_checkpoint.json"
+_HEARTBEAT_FILENAME = ".classify_progress.json"
+_AEST = timezone(timedelta(hours=10))  # Australia/Sydney standard time
 
 # Top-level vault directories that the classifier must NEVER touch — protects
 # operator-curated content (the wiki/ folder uses a different schema) and
@@ -127,6 +129,61 @@ def _format_review_queue(
     return "\n".join(lines) + "\n"
 
 
+def _now_aest_iso() -> str:
+    """Current time as ISO-8601 string with AEST (+10:00) offset.
+
+    DST handling is deliberately deferred — see plan §Deferred to
+    Implementation. Acceptable until the next AEDT switch (~Oct 2026).
+    """
+    return datetime.now(_AEST).isoformat(timespec="seconds")
+
+
+def _write_heartbeat(
+    vault: Path,
+    folder: str | None,
+    started_at: str,
+    auto_classified: int,
+    needs_review: int,
+    skipped_already_classified: int,
+    lm_latencies: list[float],
+    complete: bool,
+) -> None:
+    """Atomically write a heartbeat snapshot to vault/.classify_progress.json.
+
+    Non-blocking monitoring: any session can ``cat`` this file to see the
+    current run's progress. Best-effort — write failures are intentionally
+    NOT raised because losing a heartbeat shouldn't crash classification.
+    """
+    scanned = auto_classified + needs_review + skipped_already_classified
+    lm_avg = (
+        round(sum(lm_latencies) / len(lm_latencies), 1)
+        if lm_latencies else 0.0
+    )
+    data = {
+        "started_at": started_at,
+        "last_updated": _now_aest_iso(),
+        "complete": complete,
+        "vault": str(vault),
+        "folder": folder,
+        "totals": {
+            "scanned": scanned,
+            "auto_classified": auto_classified,
+            "needs_review": needs_review,
+            "skipped_already_classified": skipped_already_classified,
+            "lm_calls": len(lm_latencies),
+            "lm_call_avg_seconds": lm_avg,
+        },
+    }
+    target = vault / _HEARTBEAT_FILENAME
+    tmp = target.with_name(target.name + ".tmp")
+    try:
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.replace(target)
+    except OSError:
+        # Heartbeat is non-load-bearing — don't crash the run.
+        pass
+
+
 def _classify_note_content(
     title: str, body: str, folder_hint: str
 ) -> tuple[dict[str, Any], float | None]:
@@ -159,6 +216,7 @@ def classify_vault(
     processed_paths: list[str] = []
     auto_classified = 0
     skipped_already_classified = 0
+    started_at = _now_aest_iso()
 
     checkpoint_path = vault / _CHECKPOINT_FILENAME
 
@@ -229,6 +287,18 @@ def classify_vault(
             checkpoint_path.write_text(
                 json.dumps(processed_paths), encoding="utf-8"
             )
+            _write_heartbeat(
+                vault, folder, started_at,
+                auto_classified, len(review_queue), skipped_already_classified,
+                lm_latencies, complete=False,
+            )
+
+    if not dry_run:
+        _write_heartbeat(
+            vault, folder, started_at,
+            auto_classified, len(review_queue), skipped_already_classified,
+            lm_latencies, complete=True,
+        )
 
     generated = datetime.now().strftime("%Y-%m-%d")
     review_md = _format_review_queue(review_queue, vault, generated)
