@@ -194,6 +194,7 @@ Migration log appends to `~/Documents/ObsidianVault/Business/migration-log.md`. 
 
 ## Reference
 
+- **Operator reference (web)**: [`docs/operator-reference.html`](operator-reference.html) — every CLI flag and every progress-bar field. The canonical "how do I run this and what does the output mean" page.
 - **CLI specifics**: every command supports `--help`. Each `--help` includes a "Common patterns" section with copy-paste examples.
 - **Plan**: [`docs/plans/2026-05-13-001-feat-obsidian-knowledge-graph-beta-plan.md`](plans/2026-05-13-001-feat-obsidian-knowledge-graph-beta-plan.md) — parent plan for the classifier infrastructure
 - **Pre-pilot plan**: [`docs/plans/2026-05-14-001-feat-pre-pilot-classification-improvements-plan.md`](plans/2026-05-14-001-feat-pre-pilot-classification-improvements-plan.md) — this plan

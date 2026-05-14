@@ -4,7 +4,211 @@ Newest entry at top. Each entry is a resumable snapshot for a fresh Claude or Co
 
 ---
 
-## 2026-05-14 AEST — ▶ RESUME HERE: ALL 9 plan units done — pilot is the next operational step
+## 2026-05-15 EARLY-AM AEST — ▶ RESUME HERE: AWS chunk 3 complete, FileNotFoundError race patched, operator-reference page live
+
+**Runner for next turn:** human (operator). Code stable. Triage backlog growing; rules-catch low. Next moves are about reducing review-queue debt, not adding more chunks.
+
+### State on disc
+
+- **AWS chunk 3** (2026-05-14 21:43 → 2026-05-15 02:09 AEST, ~4h27m): scanned 2000, auto:1434, review:566, skip:690, missing:0, lm-avg 9.4s, rules-catch 13%, ac-rate 72%. Clean exit.
+- **AWS corpus progress**: 2124 / 6363 classified (33.4%). Vault file count dropped from 6375 → 6363 because operator deleted ~12 stale notes during chunk-2 review-queue triage.
+- **Combined review queue across all chunks**: ~700+ notes awaiting manual triage (136 from chunk 2 archived at `classification-review-2026-05-14-pm.html`, then 566 from chunk 3 in the current `classification-review.html`). This is now the dominant operational debt.
+- **Backup**: `~/Backups/ObsidianVault-pre-classification-2026-05-14.tar.gz` (2.8 GB) still intact.
+
+### What landed this session
+
+- **FileNotFoundError race patch** in `classify_vault.py`. Pre-scan (`_count_already_classified`) and main loop body both wrap file-touching code in `try/except FileNotFoundError → skip`. New `skipped_missing` counter threaded through postfix (`missing:N` segment), `.classify_progress.json` heartbeat (`totals.skipped_missing`), summary dict, and CLI summary print. Fixes the chunk-3 first-attempt crash where a file deleted by parallel operator triage killed the whole run at iteration 33. Tests: new `TestClassifyVaultRaceConditions` class with 3 tests covering single vanish, heartbeat reporting, multiple vanished files.
+- **Test suite**: 286 → 289 passed, 0 failed.
+- **`docs/operator-reference.html`** (new, 39 KB). Single-page reference: every CLI flag for `classify_vault.py` / `sample_classified.py` / `fix_evernote_titles.py` / `migrate_vault.py`, the progress-bar field-by-field reference (12 cards), the output-review guide, and three decision gates. Linked from the index hub (replaces the stale "Classifier source" card pointing at the Ollama-era `classify_notes.py`) and from status-2026-05-14.html.
+- **Project-local memory**: `feedback_handoff_runner_tag.md` saved — when handoff tags runner=human, classifier batches must be drafted not auto-launched. Captures the 2026-05-14 PM mis-execution.
+- **Two commits pushed to `origin/main`**: `feat(classify): pre-pilot classifier hardening + race tolerance` (code/tests) and a docs commit (operator-reference + index + status + RUNBOOK + this handoff entry).
+
+### Stats trend (chunks 1, 2, 3)
+
+| Chunk | Date | LM avg | Auto-rate | Rules catch | Review-queue ratio |
+|---|---|---|---|---|---|
+| 1 (Job Hunt) | 2026-05-14 AM | 26.2s | 100% | 0% | 0% |
+| 2 (AWS) | 2026-05-14 PM | 8.4s | 73% | 10% | 27% |
+| 3 (AWS) | 2026-05-15 AM | 9.4s | 72% | 13% | 28% |
+
+Pattern: LM latency stabilised post-FD-leak fix. Auto-rate and rules-catch holding. Review-queue is the leverage point — climbing 13% rules-catch is the next compounding win.
+
+### Where to focus before chunk 4
+
+1. **Mine the review queue for rule patterns** — open `classification-review.html`, look for clusters by title pattern (re:Invent sessions, "Reading list", screenshots, dated standup logs, calibration cycles, OLR templates) and bump matching patterns into `_TITLE_TYPE_RULES` in `rules_classifier.py`. Each rule moves N future notes from LM-burdened review-queue candidates to free, instant, auto-classified.
+2. **Triage the chunk-3 review queue** — 566 notes. The faster you drain this, the more honest the rules-catch lift will be on chunk 4.
+3. **Consider the helper-server idea** (see chat history): tiny local FastAPI/stdlib HTTP server so the review HTML can POST delete/reclassify actions. Builds on the patch — `missing:N` will harmlessly tick up during simultaneous batch + triage.
+4. **CHANGELOG.md still absent**. Project has `version = "0.1.0"` in `pyproject.toml` but no CHANGELOG yet. Worth bootstrapping per global Versioning Discipline rule before the next batch of behaviour-changing commits.
+
+### Next chunk command (unchanged)
+
+```bash
+cd ~/Documents/VSStudio/personal/evernote-to-obsidian
+scripts/classify/venv/bin/python scripts/classify/classify_vault.py \
+  --vault ~/Documents/ObsidianVault/Personal \
+  --folder "Evernote/notes/AWS" \
+  --limit 2000 --html
+```
+
+Estimated runtime: another ~4.5h chunk gets us to ~50% AWS done.
+
+---
+
+## 2026-05-14 EVENING AEST — AWS chunk 2 complete, ~5600 unclassified left (superseded by entry above)
+
+**Runner for next turn:** human (operator). Code is stable, classifier is calibrated. Continue chunking AWS, then drop `--folder` to sweep the rest of the Personal vault.
+
+### State on disc
+
+- **691 AWS notes classified** (327 from morning + 364 from evening chunk). Personal vault total classified: ~707 (16 Job Hunt + 691 AWS).
+- **AWS remainder**: ~5,684 unclassified. At observed 8.4 sec/LM-call + 10% rules catch + 27% review rate, projected ~10–11 hours of LM time.
+- **Personal vault total**: ~10,621 .md files; ~10,500 require classification (minus wiki/, raw/, _resources/).
+- **136 notes** in the latest chunk's review queue (`classification-review.html` open in browser).
+- **Backup tarball**: `~/Backups/ObsidianVault-pre-classification-2026-05-14.tar.gz` (2.8 GB) — intact, safe rollback path.
+
+### What landed this session (in addition to morning's parser hardening + title fixer)
+
+- **FD-leak fix in `lm_classifier.py`.** `openai.OpenAI()` was being instantiated per call → httpx connection-pool leak → crash at ~297 LM calls. Replaced with `functools.lru_cache(maxsize=1)` singleton. Regression test in `tests/unit/classify/test_lm_classifier.py::TestSingletonClientLifecycle`. Side effect: LM avg dropped from 18.7 sec → 8.4 sec (connection-pool reuse).
+- **HTML audit output.** New `scripts/classify/html_renderer.py` (~270 lines, 12 unit tests). Self-contained dark-themed HTML with `obsidian://open` click-through links. `--html` flag on `classify_vault.py` writes `classification-review.html` alongside the .md. `--html PATH` flag on `sample_classified.py` writes a sample report to a chosen path.
+- **Rules cascade overhaul.** New `_TITLE_TYPE_RULES` list (1-1, standup, weekly sync, sprint, interview, OLR/PIP, calibration, goals, re:Invent, summit, roadmap, screenshot, SKO, yearly). Folder-hint org confidence bumped 0.5 → 0.95. Min-keyword-score gate (≥2 keywords required, single-keyword matches drop to 0.5 confidence). Noisy interview/career keywords trimmed. 25 new tests. AWS rules-catch went from 0% → 10% in production.
+- **Progress bar overhaul** in `classify_vault.py`. Bar now tracks ACTUAL classifications (not iterations through file_list). New postfix segments: `skip:N`, `ac:X%`, `rules:X%`, `corpus-eta:Xh`. 12 new unit tests.
+- **Tests:** 286 passed, 3 deselected (live LM), 0 failed. (Up from 209 at session start.)
+
+### Real chunk performance (2026-05-14 19:29–20:32)
+
+```json
+{
+  "scanned": 827, "auto_classified": 364, "needs_review": 136,
+  "skipped_already_classified": 327, "lm_calls": 450,
+  "lm_call_avg_seconds": 8.4
+}
+```
+
+500-note chunk in ~1 hour, clean exit. Rules: 50 of 500 attempts caught without LM (~10%). LM auto-rate: 73% (310 auto-from-LM out of 450 LM calls). Review rate: 27%. These numbers are calibration-baseline going forward.
+
+### Two review commands per chunk
+
+```bash
+# Spot-check confident classifications (different seed each time)
+scripts/classify/venv/bin/python scripts/classify/sample_classified.py \
+  --vault ~/Documents/ObsidianVault/Personal \
+  --folder "Evernote/notes/AWS" --n 20 --seed <new-number> \
+  --html ~/Documents/ObsidianVault/Personal/sample_classified.html
+open ~/Documents/ObsidianVault/Personal/sample_classified.html
+
+# Review the review queue
+open ~/Documents/ObsidianVault/Personal/classification-review.html
+```
+
+### Next chunk command
+
+```bash
+cd ~/Documents/VSStudio/personal/evernote-to-obsidian
+scripts/classify/venv/bin/python scripts/classify/classify_vault.py \
+  --vault ~/Documents/ObsidianVault/Personal \
+  --folder "Evernote/notes/AWS" \
+  --limit 500 --html
+```
+
+Bigger chunks are fine now that the FD leak is fixed — `--limit 2000` would be a ~3.3-hour overnight chunk.
+
+When AWS is done, drop `--folder` to sweep T-Systems / Personal NoteBook / TSC / Cooking / etc.
+
+### Operational backlog (after AWS is classified)
+
+1. ~~Smoke-test MOC inbox pattern.~~ Done — Dataview Cheatsheet + working inbox blocks verified.
+2. ~~Install Dataview in Business vault.~~ Done — both vaults have it.
+3. ~~Stage 0a Job Hunt pilot.~~ Done.
+4. **Stage 0b — finish vault-wide classification.** In progress (691/10,500 done; ~5,684 AWS + ~4,160 non-AWS remaining).
+5. **Triage the review queue.** Combined across runs (~163 review-queue notes total: 27 from AM Job Hunt + 136 from PM AWS). Manual: open `classification-review.html`, add the correct `up:` frontmatter or delete the note.
+6. **Unit 8 — `migrate_vault.py`** moves classified work notes to Business vault. Default dry-run; pass `--confirm`.
+7. **Decide about legacy `Personal/Meetings/Meetings Homepage.md`** (Granola's `regenerate_index` still writes to it).
+
+### Uncommitted changes — substantial
+
+In addition to morning's uncommitted state:
+- `scripts/classify/lm_classifier.py` — singleton client
+- `scripts/classify/classify_vault.py` — bar fix + 4 new postfix segments + manual tqdm + checkpoint logic untouched
+- `scripts/classify/rules_classifier.py` — title rules + folder boost + min-score gate + trimmed keywords
+- `scripts/classify/html_renderer.py` — new (~270 lines)
+- `scripts/classify/fix_evernote_titles.py` — new (~200 lines, from AM)
+- Tests: `test_lm_classifier.py` (+singleton tests), `test_rules_classifier.py` (+25 tests), `test_classify_vault_helpers.py` (new, 25 tests), `test_html_renderer.py` (new, 12 tests), `test_frontmatter.py` (+6 tests for tolerance), `test_fix_evernote_titles.py` (new, 12 tests)
+- Cumulative: **691 AWS notes** classified on disc via `up:` frontmatter (these are user data, not code)
+- Cumulative: **1,540 AWS note titles** quoted in YAML frontmatter (from AM session's title fixer)
+
+User has not committed any of this yet. Consider a multi-commit split if/when they do (one per logical change).
+
+---
+
+## 2026-05-14 PM AEST — pipeline unblocked, AWS ready for classify (superseded by entry above)
+
+**Runner for next turn:** human (operator). Code + data fixes done; the next step is running the classifier on AWS in chunks.
+
+### What landed this session
+
+- **`scripts/classify/frontmatter.py` hardened.** `_split()` now catches `yaml.YAMLError` and returns `{}`/text instead of crashing the pipeline. Same defence applies transitively to `read_frontmatter`, `is_classified`, `write_frontmatter`. Six new tests in `tests/unit/classify/test_frontmatter.py::TestReadFrontmatterMalformedYAML` lock the behaviour.
+- **`scripts/classify/fix_evernote_titles.py` new.** One-shot script that quotes unquoted Evernote-export titles. Single-quote style with apostrophe-doubling per YAML spec. Skip-list shared with `classify_vault.py` (reuses `_iter_md_files`). Atomic write + 50 ms iCloud sleep per file. 12 unit tests in `tests/unit/classify/test_fix_evernote_titles.py`.
+- **Applied to all of Evernote/notes/AWS.** 1,540 / 6,375 titles fixed in 88 sec. `unfixable=0`. Re-scan confirms 0 YAML parse failures across all 6,375 AWS notes.
+- **`sample_classified.py` now runs cleanly on AWS.** Returns "0 classified notes" (correct — AWS hasn't been classified yet), no traceback.
+- **HTML review output** added to both `classify_vault.py --html` (writes `classification-review.html`) and `sample_classified.py --html PATH` (writes sample report HTML). Self-contained, dark theme, click-through `obsidian://open` links, confidence-bucketed badges. New `scripts/classify/html_renderer.py` module (~270 lines) with 12 unit tests.
+- **Progress bar overhaul** in `classify_vault.py`:
+  - Bar denominator now respects `--limit` (was always full folder size). New `_progress_total` helper, 5 unit tests.
+  - Postfix now includes corpus-overall progress as a second signal: `auto:N | review:N | lm-avg:Xs | overall: X/Y (Z.Z%)`. The overall count is `corpus_classified_at_start + auto_classified_this_run`. Pre-scan via new `_count_already_classified` helper (~3 sec for 6,375 files). New `_overall_postfix` helper. 8 unit tests across both helpers.
+- **Tests:** 234 passed, 3 deselected (live LM Studio tests), 0 failed.
+
+### Bug context (so the next session understands the shape)
+
+Evernote .enex → markdown export wrote `title:` values raw — e.g. `title: 1-1: Stefan`, `title: - Business Card`, `title: * [[link]]`. YAML treats those as structural (`:` = mapping, `-` = sequence, `*` = alias) and `yaml.safe_load` correctly rejected them. 100% of failures (1,540/1,540) were title-line only; no other field was malformed. The fix is purely cosmetic (wraps the title value in single quotes) — round-trip preserves the original string verbatim.
+
+### What's NOT yet done (still the operational backlog)
+
+1. ~~Smoke-test the MOC inbox pattern.~~ Partially validated. Job Hunt.md's malformed dataview block was fixed this session; Interview Prep.md confirmed rendering correctly.
+2. ~~Install Dataview in Business vault.~~ Done — verified, both vaults have it.
+3. ~~Stage 0a pilot — Job Hunt folder.~~ Done in the AM run. 16/16 auto-classified, 0 review queue, confidence 0.9–1.0. Two debatable routing calls noted: `_Dashboard.md` typed as `application` (meta-tracker), `LP Quick-Reference — Amazon Leadership Principles.md` routed to `[[Personal]]` (probably should be `[[Interview Prep]]`). Acceptable; not blocking AWS.
+4. **Stage 0b — AWS classification.** Now unblocked. Run in chunks for monitoring. Time estimate: ~46h LM-only if every note hits the LM (Job Hunt pilot ran 16/16 through LM at avg 26.2 sec); AWS may run faster if `type: technical` content trips the rules cascade more often. **First chunk should be small (e.g. `--limit 100`)** so the operator can audit before scaling. Audit signals after each chunk:
+   - `classification-review.md` — review queue (low-confidence)
+   - `.classify_progress.json` — totals + per-call timing
+   - `sample_classified.py --folder "Evernote/notes/AWS" --n 20 --seed 42` — spot-check high-confidence calls that won't appear in the review queue
+   - Open `Reference.md`, `Personal.md`, `Technical.md` (Business) MOCs in Obsidian — inbox blocks should populate
+5. Unit 8 — `migrate_vault.py` moves work notes to Business after classification. Default dry-run; pass `--confirm` to actually move.
+6. Decide about legacy `Personal/Meetings/Meetings Homepage.md` (granolaSync's `regenerate_index` still writes to it).
+
+### Concrete next command
+
+```bash
+cd ~/Documents/VSStudio/personal/evernote-to-obsidian
+scripts/classify/venv/bin/python scripts/classify/classify_vault.py \
+  --vault ~/Documents/ObsidianVault/Personal \
+  --folder "Evernote/notes/AWS" --limit 100
+```
+
+Then audit:
+```bash
+cat ~/Documents/ObsidianVault/Personal/classification-review.md
+cat ~/Documents/ObsidianVault/Personal/.classify_progress.json
+scripts/classify/venv/bin/python scripts/classify/sample_classified.py \
+  --vault ~/Documents/ObsidianVault/Personal \
+  --folder "Evernote/notes/AWS" --n 20 --seed 42
+```
+
+### Uncommitted changes (substantial)
+
+In addition to the AM session's uncommitted state:
+- `scripts/classify/frontmatter.py` — try/except around yaml.safe_load
+- `scripts/classify/fix_evernote_titles.py` — new file (~200 lines)
+- `tests/unit/classify/test_frontmatter.py` — +6 tests
+- `tests/unit/classify/test_fix_evernote_titles.py` — new file (12 tests)
+- **1,540 modified files under `~/Documents/ObsidianVault/Personal/Evernote/notes/AWS/`** — title-line edits only. Backup at `~/Backups/ObsidianVault-pre-classification-2026-05-14.tar.gz` (2.8 GB) intact.
+
+### Other small fixes this session
+
+- `docs/handoff/handoff.md` earlier "install Dataview in Business" claim corrected (was already installed).
+- `~/Documents/ObsidianVault/Personal/Job Hunt.md` had a paste-corrupted dataview block (line 9 with collapsed fence) — fixed.
+- New reference doc: `~/Documents/ObsidianVault/Personal/tools/Dataview Cheatsheet.md` — 10 common dataview queries scoped to this vault's R2 schema.
+
+---
+
+## 2026-05-14 AM AEST — ALL 9 plan units done — pilot is the next operational step (superseded by entry above)
 
 **Runner for next turn:** human (operator). The code is done; the next step is running the classifier against the Job Hunt pilot, then reviewing the output before scaling to AWS.
 
@@ -40,16 +244,10 @@ Newest entry at top. Each entry is a resumable snapshot for a fresh Claude or Co
 
 These are deliberate gating steps — the plan said classify before migrate, pilot before AWS.
 
-1. **Smoke-test the MOC inbox pattern in Obsidian.** Open `Personal/Meetings.md`, create a throwaway note with `up: "[[Meetings]]"`, confirm it appears in the Dataview LIST within ~2s. Repeat for `Job Hunt.md` and `Interview Prep.md`.
-2. **Install Dataview in the Business vault.** Pre-flight showed it's missing. Business MOCs' Dataview queries render as plain code blocks until installed.
-3. **Stage 0a pilot — classify the Job Hunt folder (~35 notes).** Run:
-   ```
-   scripts/classify/venv/bin/python scripts/classify/classify_vault.py \
-     --vault ~/Documents/ObsidianVault/Personal \
-     --folder "Job Hunt"
-   ```
-   Review `~/Documents/ObsidianVault/Personal/classification-review.md` for accuracy.
-4. **Stage 0b — classify Evernote/notes/AWS** (6,375 notes, ~15h LLM inference). Run overnight or chunked with `--limit 500`.
+1. **Smoke-test the MOC inbox pattern in Obsidian.** Open `Personal/Meetings.md`, create a throwaway note with `up: "[[Meetings]]"`, confirm it appears in the Dataview LIST within ~2s. Repeat for `Job Hunt.md` and `Interview Prep.md`. (Partially validated 2026-05-14 PM: dataview block renders correctly on Interview Prep; Job Hunt.md had a malformed paste-corrupted block, now fixed.)
+2. ~~**Install Dataview in the Business vault.**~~ **Done** — verified 2026-05-14 AEST. `Business/.obsidian/community-plugins.json` lists `dataview`, plugin folder present in both vaults. Earlier "missing" claim was a stale pre-flight note.
+3. ~~**Stage 0a pilot — classify the Job Hunt folder.**~~ **Done** — 2026-05-14 11:52–11:59 AEST. 16/16 auto-classified, 0 in review queue, all confidence ≥ 0.9 (1× 0.9, 13× 0.95, 2× 1.0). LM was called 16/16 times (rules cascade caught nothing in Job Hunt) at avg 26.2 sec/call. Type distribution: 10 interview, 4 note, 2 application. Routing distribution: 10 `[[Interview Prep]]`, 4 `[[Personal]]`, 2 `[[Job Hunt]]`. Spot-check flagged two debatable calls: `_Dashboard.md` typed as `application` (it's a meta-tracker) and `LP Quick-Reference — Amazon Leadership Principles.md` typed as `note → [[Personal]]` (probably should be `interview → [[Interview Prep]]`).
+4. **Stage 0b — classify Evernote/notes/AWS** (6,375 notes). **Revised time estimate: ~46h LM inference**, not 15h — from the pilot's measured 26.2 sec/note × 6,375. AWS may be faster if the rules cascade catches more `type: technical` content there than it did in Job Hunt. Plan 2–3 overnight runs, chunked with `--limit`. First chunk should be small (e.g. `--limit 100`) so the user can audit before scaling. Audit signals after each chunk: `classification-review.md` (review queue), `.classify_progress.json` (totals + per-call timing), and `sample_classified.py --folder "Evernote/notes/AWS"` for spot-checking high-confidence calls that won't appear in the review queue.
 5. **Then Unit 8 — migrate_vault** moves classified work notes to Business, classified personal notes to Personal root. Default is dry-run; pass `--confirm` to actually move.
 6. **Decide about the legacy `Personal/Meetings/Meetings Homepage.md`.** The granolaSync `regenerate_index` function still writes to it on every Granola sync. Either delete it manually (the new `Meetings.md` MOC supersedes it) and disable `regenerate_index` calls, OR leave both for redundancy.
 
