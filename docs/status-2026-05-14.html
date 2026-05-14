@@ -85,6 +85,10 @@
   .unit h3{font-family:var(--font-display);font-weight:700;font-size:1rem;letter-spacing:-0.015em;line-height:1.25;margin-bottom:0.4rem;position:relative;z-index:1}
   .unit .desc{font-size:0.84rem;color:var(--text-dim);line-height:1.5;position:relative;z-index:1}
   .unit .meta{margin-top:0.7rem;font-family:var(--font-mono);font-size:0.7rem;color:var(--text-faint);letter-spacing:0;position:relative;z-index:1}
+  .unit.pending::before{background:linear-gradient(135deg,rgba(139,146,168,0.05),transparent 70%);opacity:0.5}
+  .unit.pending .ribbon{color:var(--text-faint)}
+  .unit.pending .ribbon::before{content:'⋯';background:rgba(139,146,168,0.3);color:var(--text-faint)}
+  .unit.pending h3,.unit.pending .desc{opacity:0.7}
 
   /* Pipeline flow diagram */
   .flow{background:rgba(18,21,28,0.6);border:1px solid var(--border);border-radius:var(--radius);padding:1.75rem;backdrop-filter:blur(20px);overflow-x:auto}
@@ -382,6 +386,22 @@ tar -xzf ~/Backups/ObsidianVault-pre-classification-2026-05-14.tar.gz -C ~/Docum
           <li style="padding-left:1.5rem;position:relative"><span style="position:absolute;left:0;color:var(--text-faint)">—</span> Pre-existing CLAUDE.md and config files</li>
         </ul>
       </div>
+    </div>
+  </section>
+
+  <!-- Pre-pilot improvements progress (live) -->
+  <section class="section">
+    <div class="section-label">Pre-pilot improvements · live progress</div>
+    <h2>7 units shipping before the Job Hunt pilot</h2>
+    <p class="intro">Tooling improvements identified by the pre-pilot <a href="https://github.com/gilesparnell/evernote-to-obsidian/blob/main/docs/brainstorms/2026-05-14-pre-pilot-classification-improvements-requirements.md">brainstorm</a> and scoped into a <a href="https://github.com/gilesparnell/evernote-to-obsidian/blob/main/docs/plans/2026-05-14-001-feat-pre-pilot-classification-improvements-plan.md">7-unit plan</a>. This panel updates live as each unit completes — refresh to follow along.</p>
+    <div class="units">
+      <div class="unit"><div class="ribbon">Unit 1</div><h3>Scope-safety skip-list</h3><p class="desc">wiki/ and Personal-backup-*/ are unconditional no-touch zones. Protects hand-curated content from accidental overwrite.</p><div class="meta">4 tests · commit 4bd6fb2</div></div>
+      <div class="unit pending"><div class="ribbon">Unit 2</div><h3>Live progress bar</h3><p class="desc">tqdm wrapping iteration; postfix shows running auto/review counts + lm-avg latency.</p><div class="meta">pending</div></div>
+      <div class="unit pending"><div class="ribbon">Unit 3</div><h3>Heartbeat JSON</h3><p class="desc"><code>.classify_progress.json</code> snapshot every checkpoint; non-blocking monitoring via cat/tail.</p><div class="meta">pending</div></div>
+      <div class="unit pending"><div class="ribbon">Unit 4</div><h3>sample_classified CLI</h3><p class="desc">Sample N random auto-classified notes; --filter AND-stacking; --seed for reproducibility.</p><div class="meta">pending</div></div>
+      <div class="unit pending"><div class="ribbon">Unit 5</div><h3>Rich --help on every CLI</h3><p class="desc">Description + Common patterns epilogue + concrete flag help so each tool reads cleanly.</p><div class="meta">pending</div></div>
+      <div class="unit pending"><div class="ribbon">Unit 6</div><h3>docs/RUNBOOK.md</h3><p class="desc">Two passes: structure + procedures + troubleshooting pre-pilot; real classified-note examples after pilot.</p><div class="meta">pending · 2 passes</div></div>
+      <div class="unit pending"><div class="ribbon">Unit 7</div><h3>Status page extension</h3><p class="desc">"How to use it" mini-grid linking the RUNBOOK and listing the three most common commands.</p><div class="meta">pending</div></div>
     </div>
   </section>
 
