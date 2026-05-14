@@ -56,12 +56,37 @@ def migrate(root: Path, dry_run: bool = True) -> dict[str, Any]:
     return {"rewrites": rewrites, "skipped": skipped, "dry_run": dry_run}
 
 
+_CLI_DESCRIPTION = """\
+Rewrite the legacy `up: "[[Meetings Homepage]]"` link to the canonical
+`"[[Meetings]]"` across a vault. One-shot cleanup used once before the
+new Meetings MOC goes live. Atomic .tmp+rename writes; skips hidden dirs.
+"""
+
+_CLI_EPILOG = """\
+Common patterns:
+
+  # Dry run (default) - count what would change, no writes
+  %(prog)s --vault ~/Documents/ObsidianVault/Personal
+
+  # Apply rewrites
+  %(prog)s --vault ~/Documents/ObsidianVault/Personal --confirm
+"""
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--vault", required=True, type=Path,
-                        help="Vault root to scan recursively.")
-    parser.add_argument("--confirm", action="store_true",
-                        help="Apply changes (default is a count-only dry run).")
+    parser = argparse.ArgumentParser(
+        description=_CLI_DESCRIPTION,
+        epilog=_CLI_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--vault", required=True, type=Path,
+        help="Vault root to scan recursively.",
+    )
+    parser.add_argument(
+        "--confirm", action="store_true",
+        help="Apply changes. Default is a count-only dry run.",
+    )
     args = parser.parse_args()
 
     result = migrate(args.vault, dry_run=not args.confirm)

@@ -25,6 +25,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Allow direct script invocation in addition to `python -m`.
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from scripts.classify.classify_vault import _iter_md_files
 from scripts.classify.frontmatter import is_classified, read_frontmatter
 
@@ -136,17 +141,50 @@ def render_report(samples: list[Path], vault: Path) -> str:
     return "\n".join(out)
 
 
+_CLI_DESCRIPTION = """\
+Sample N random auto-classified notes from a vault and print a terminal
+report with title, R2 fields, and a body excerpt. Used after each
+classification run to validate quality before scaling or migrating.
+
+Reuses the shared skip-list from classify_vault, so wiki/ and
+Personal-backup-* are never sampled.
+"""
+
+_CLI_EPILOG = """\
+Common patterns:
+
+  # Spot-check Job Hunt pilot output (default n=10)
+  %(prog)s --vault ~/Documents/ObsidianVault/Personal --folder "Job Hunt"
+
+  # Only Amazon meetings, reproducible across runs
+  %(prog)s --vault ~/Documents/ObsidianVault/Personal \\
+    --filter type=meeting --filter org=Amazon --seed 42
+
+  # Pipe to file for later review (ANSI dimming auto-disables when piped)
+  %(prog)s --vault ~/Documents/ObsidianVault/Personal --n 50 > samples.txt
+"""
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description=__doc__.split("\n")[0] if __doc__ else "",
+        description=_CLI_DESCRIPTION,
+        epilog=_CLI_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--vault", required=True, type=Path)
-    parser.add_argument("--folder", default=None)
+    parser.add_argument(
+        "--vault", required=True, type=Path,
+        help="Obsidian vault root.",
+    )
+    parser.add_argument(
+        "--folder", default=None,
+        help="Restrict sampling to a single subfolder (default: whole vault).",
+    )
     parser.add_argument(
         "--n",
         type=int,
         default=DEFAULT_N,
-        help=f"Number of notes to sample (default {DEFAULT_N}).",
+        help=f"Number of notes to sample (default {DEFAULT_N}). "
+             "If fewer matched than N, all matched are returned.",
     )
     parser.add_argument(
         "--filter",
@@ -159,7 +197,7 @@ def main() -> None:
         "--seed",
         type=int,
         default=None,
-        help="Random seed for reproducible sampling.",
+        help="Random seed for reproducible sampling (useful when debugging).",
     )
     args = parser.parse_args()
 

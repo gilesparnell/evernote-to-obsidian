@@ -31,6 +31,13 @@ from typing import Any, Iterator
 
 from tqdm import tqdm
 
+# Allow direct script invocation (`python scripts/classify/classify_vault.py`).
+# Module invocation (`python -m scripts.classify.classify_vault`) already
+# puts the repo root on sys.path; direct invocation does not.
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from scripts.classify import frontmatter as _fm
 from scripts.classify import lm_classifier, rules_classifier
 
@@ -316,16 +323,59 @@ def classify_vault(
     }
 
 
+_CLI_DESCRIPTION = """\
+Classify Obsidian notes into R2 schema (type / org / context / people / tags)
+via a rules-first then LM-Studio-fallback cascade. Notes scoring >= 0.80
+confidence get frontmatter written in place; lower-confidence notes go
+to classification-review.md for manual review.
+
+Progress bar + .classify_progress.json heartbeat make long runs (AWS:
+~15 hours) safe to monitor from a separate terminal.
+"""
+
+_CLI_EPILOG = """\
+Common patterns:
+
+  # Pilot - Job Hunt folder (~35 notes, minutes)
+  %(prog)s --vault ~/Documents/ObsidianVault/Personal --folder "Job Hunt"
+
+  # AWS scale-out (~15h overnight), chunked for visible progress
+  %(prog)s --vault ~/Documents/ObsidianVault/Personal \\
+    --folder "Evernote/notes/AWS" --limit 500
+
+  # Dry run - count what would happen, no writes
+  %(prog)s --vault ~/Documents/ObsidianVault/Personal \\
+    --folder "Job Hunt" --dry-run
+
+  # Watch progress from a separate terminal
+  cat ~/Documents/ObsidianVault/Personal/.classify_progress.json
+"""
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--vault", required=True, type=Path,
-                        help="Path to the Obsidian vault root.")
-    parser.add_argument("--folder", default=None,
-                        help="Restrict processing to a single subfolder.")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="No files written; review queue printed to stdout.")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="Process at most N unclassified notes this run.")
+    parser = argparse.ArgumentParser(
+        description=_CLI_DESCRIPTION,
+        epilog=_CLI_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--vault", required=True, type=Path,
+        help="Obsidian vault root (e.g. ~/Documents/ObsidianVault/Personal).",
+    )
+    parser.add_argument(
+        "--folder", default=None,
+        help="Restrict to one subfolder. Default: scan the whole vault. "
+             "Skip-list (wiki/, Personal-backup-*, hidden dirs) still applies.",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Count what would happen; no frontmatter writes, no checkpoint, "
+             "no heartbeat. Review queue printed to stdout instead of file.",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None,
+        help="Stop after processing N unclassified notes (default: no limit).",
+    )
     args = parser.parse_args()
 
     summary = classify_vault(

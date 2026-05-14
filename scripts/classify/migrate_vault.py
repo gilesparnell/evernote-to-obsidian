@@ -27,9 +27,15 @@ from __future__ import annotations
 
 import argparse
 import shutil
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+# Allow direct script invocation in addition to `python -m`.
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.classify import frontmatter as _fm
 
@@ -130,18 +136,57 @@ def migrate_vault(
     }
 
 
+_CLI_DESCRIPTION = """\
+Move classified Evernote-imported notes out of Personal/Evernote/ subfolders
+to the right vault root: context=work to Business/, context=personal or
+education to Personal/. End state: zero Evernote/ subfolders.
+
+Unclassified notes are skipped with a warning - run classify_vault first.
+Filename collisions get _2, _3 suffixes; nothing is ever overwritten.
+"""
+
+_CLI_EPILOG = """\
+Common patterns:
+
+  # Preview only - see counts, no moves (default)
+  %(prog)s --personal ~/Documents/ObsidianVault/Personal \\
+    --business ~/Documents/ObsidianVault/Business
+
+  # Apply migration after classify + sampling have validated quality
+  %(prog)s --personal ~/Documents/ObsidianVault/Personal \\
+    --business ~/Documents/ObsidianVault/Business --confirm
+
+  # Staged rollout - first 100 notes only
+  %(prog)s --personal ... --business ... --confirm --limit 100
+"""
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--personal", required=True, type=Path,
-                        help="Personal vault root.")
-    parser.add_argument("--business", required=True, type=Path,
-                        help="Business vault root.")
-    parser.add_argument("--confirm", action="store_true",
-                        help="Apply moves. Default is a count-only dry run.")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Force dry run even if --confirm is also passed.")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="Cap the number of notes moved this run.")
+    parser = argparse.ArgumentParser(
+        description=_CLI_DESCRIPTION,
+        epilog=_CLI_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--personal", required=True, type=Path,
+        help="Personal vault root (source of work/personal notes to migrate).",
+    )
+    parser.add_argument(
+        "--business", required=True, type=Path,
+        help="Business vault root (destination for work-context notes).",
+    )
+    parser.add_argument(
+        "--confirm", action="store_true",
+        help="Apply moves. Default is a count-only dry run.",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Force dry run even if --confirm is also passed. Wins on conflict.",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None,
+        help="Cap the number of notes moved this run (default: no cap).",
+    )
     args = parser.parse_args()
 
     # --dry-run wins over --confirm if both are passed.
