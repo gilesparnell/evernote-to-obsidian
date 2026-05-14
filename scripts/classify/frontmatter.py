@@ -31,7 +31,13 @@ def _split(text: str) -> tuple[dict[str, Any], str]:
     match = _FRONTMATTER_RE.match(text)
     if not match:
         return {}, text
-    parsed = yaml.safe_load(match.group(1)) or {}
+    try:
+        parsed = yaml.safe_load(match.group(1)) or {}
+    except yaml.YAMLError:
+        # Malformed YAML (e.g. unquoted Evernote-export titles like
+        # `title: 1-1: Stefan`). Treat as no frontmatter so the pipeline
+        # routes the note through the normal cascade instead of crashing.
+        return {}, text
     if not isinstance(parsed, dict):
         # YAML block parsed to a non-dict (scalar, list) — refuse rather
         # than guess. Caller treats this as no frontmatter.

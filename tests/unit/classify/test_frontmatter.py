@@ -44,6 +44,102 @@ class TestReadFrontmatter:
         assert fm["tags"] == ["star", "draft"]
 
 
+class TestReadFrontmatterMalformedYAML:
+    """Real Evernote exports emit unquoted titles that break yaml.safe_load.
+
+    The parser must treat those notes as if they had no frontmatter (return
+    an empty dict) rather than crash the pipeline. Patterns observed in
+    Evernote/notes/AWS (2026-05-14, 1540/6375 notes affected):
+      - title: 1-1: Stefan            (unquoted colon)
+      - title: - Business Card        (leading dash → sequence)
+      - title: * [[link]]             (leading asterisk → alias)
+      - title: [Cancelled] Foo: Bar   (flow-mapping prefix + colon)
+    """
+
+    def test_unquoted_colon_in_title_returns_empty_dict(
+        self, tmp_path: Path
+    ) -> None:
+        note = tmp_path / "bad.md"
+        note.write_text(
+            "---\n"
+            "title: 1-1: Stefan\n"
+            "created: 2016-01-01T00:00:00+11:00\n"
+            "source: evernote\n"
+            "---\n\nbody\n",
+            encoding="utf-8",
+        )
+        assert read_frontmatter(note) == {}
+
+    def test_leading_dash_in_title_returns_empty_dict(
+        self, tmp_path: Path
+    ) -> None:
+        note = tmp_path / "bad.md"
+        note.write_text(
+            "---\n"
+            "title: - Business Card\n"
+            "source: evernote\n"
+            "---\n\nbody\n",
+            encoding="utf-8",
+        )
+        assert read_frontmatter(note) == {}
+
+    def test_leading_asterisk_in_title_returns_empty_dict(
+        self, tmp_path: Path
+    ) -> None:
+        note = tmp_path / "bad.md"
+        note.write_text(
+            "---\n"
+            "title: * [[APAC 2x2's]]\n"
+            "source: evernote\n"
+            "---\n\nbody\n",
+            encoding="utf-8",
+        )
+        assert read_frontmatter(note) == {}
+
+    def test_flow_mapping_prefix_with_colon_returns_empty_dict(
+        self, tmp_path: Path
+    ) -> None:
+        note = tmp_path / "bad.md"
+        note.write_text(
+            "---\n"
+            "title: [Cancelled] Credit Card: Skye\n"
+            "source: evernote\n"
+            "---\n\nbody\n",
+            encoding="utf-8",
+        )
+        assert read_frontmatter(note) == {}
+
+    def test_is_classified_returns_false_for_malformed_yaml(
+        self, tmp_path: Path
+    ) -> None:
+        """Defence-in-depth: is_classified() must not crash either."""
+        note = tmp_path / "bad.md"
+        note.write_text(
+            "---\n"
+            "title: 1-1: Stefan\n"
+            "---\n\nbody\n",
+            encoding="utf-8",
+        )
+        assert is_classified(note) is False
+
+    def test_valid_yaml_still_parses_after_hardening(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression: hardening must not regress the happy path."""
+        note = tmp_path / "good.md"
+        note.write_text(
+            '---\n'
+            'title: "Valid Title"\n'
+            'type: meeting\n'
+            'org: Amazon\n'
+            "---\n\nbody\n",
+            encoding="utf-8",
+        )
+        fm = read_frontmatter(note)
+        assert fm["title"] == "Valid Title"
+        assert fm["type"] == "meeting"
+
+
 class TestWriteFrontmatter:
     def test_creates_frontmatter_block_when_absent(self, tmp_path: Path) -> None:
         note = tmp_path / "n.md"

@@ -326,6 +326,7 @@ class TestClassifyVaultProgress:
         assert result["auto_classified"] == 0
         assert result["needs_review"] == 0
 
+
     def test_progress_bar_handles_all_already_classified(self, tmp_path: Path) -> None:
         # Every note pre-classified; the iter yields entries but they all skip.
         _write_note(
@@ -338,6 +339,79 @@ class TestClassifyVaultProgress:
         result = classify_vault(vault=tmp_path)
         assert result["skipped_already_classified"] == 1
         assert result["auto_classified"] == 0
+
+
+class TestClassifyVaultRaceConditions:
+    """Vault files can disappear between the initial directory walk and the
+    per-file read — typically because the operator is manually triaging the
+    review queue (deleting or renaming notes) in parallel with a multi-hour
+    classification batch. A single FileNotFoundError must not abort the run.
+    """
+
+    def test_continues_when_file_vanishes_between_scan_and_read(
+        self, tmp_path: Path
+    ) -> None:
+        real_note = tmp_path / "real.md"
+        _write_note(
+            real_note,
+            body=(
+                "AWS S3 EC2 Lambda CloudWatch IAM standup meeting agenda "
+                "action items attendees retrospective minutes. Discussing the "
+                "deployment pipeline and capacity planning."
+            ),
+        )
+        ghost_path = tmp_path / "ghost.md"  # listed by walker, never written
+
+        with patch(
+            "scripts.classify.classify_vault._iter_md_files",
+            return_value=iter([ghost_path, real_note]),
+        ):
+            result = classify_vault(vault=tmp_path)
+
+        assert result["skipped_missing"] == 1
+        assert result["auto_classified"] == 1
+        assert result["needs_review"] == 0
+
+    def test_skipped_missing_appears_in_heartbeat_totals(
+        self, tmp_path: Path
+    ) -> None:
+        # The progress JSON checkpoint must record skipped_missing so an
+        # external watcher can see the count without parsing the log.
+        real_note = tmp_path / "real.md"
+        _write_note(real_note, body="some real body content for classification")
+        ghost = tmp_path / "ghost.md"
+
+        with patch(
+            "scripts.classify.classify_vault._iter_md_files",
+            return_value=iter([ghost, real_note]),
+        ), patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("note", "Personal", confidence=0.2),
+        ):
+            classify_vault(vault=tmp_path)
+
+        progress = json.loads(
+            (tmp_path / ".classify_progress.json").read_text(encoding="utf-8")
+        )
+        assert progress["totals"]["skipped_missing"] == 1
+
+    def test_multiple_missing_files_all_counted(self, tmp_path: Path) -> None:
+        real_note = tmp_path / "real.md"
+        _write_note(real_note, body="real body content for classification")
+        ghosts = [tmp_path / f"ghost-{i}.md" for i in range(3)]
+
+        with patch(
+            "scripts.classify.classify_vault._iter_md_files",
+            return_value=iter([*ghosts, real_note]),
+        ), patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("note", "Personal", confidence=0.2),
+        ):
+            result = classify_vault(vault=tmp_path)
+
+        assert result["skipped_missing"] == 3
+        # The real note still got processed (review queue, low confidence)
+        assert result["needs_review"] + result["auto_classified"] == 1
 
 
 class TestClassifyVaultHeartbeat:

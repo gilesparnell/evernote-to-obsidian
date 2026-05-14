@@ -17,6 +17,7 @@ is functionally identical to forcing the named function.
 
 from __future__ import annotations
 
+import functools
 import json
 from typing import Any
 
@@ -24,6 +25,18 @@ import openai
 
 LM_STUDIO_BASE_URL = "http://localhost:1234/v1"
 LM_STUDIO_MODEL = "google/gemma-4-e4b"
+
+
+@functools.lru_cache(maxsize=1)
+def _get_client() -> openai.OpenAI:
+    """Singleton openai.OpenAI client.
+
+    Re-instantiating per call leaks httpx connection-pool file descriptors;
+    a 2026-05-14 batch crashed at ~297 LM calls with EMFILE. The cache
+    ensures one instance per process. Tests use `_get_client.cache_clear()`
+    via an autouse fixture so each test's patched openai.OpenAI takes effect.
+    """
+    return openai.OpenAI(base_url=LM_STUDIO_BASE_URL, api_key="lm-studio")
 
 _TYPE_ENUM = [
     "meeting", "note", "technical", "reference", "person", "company",
@@ -118,7 +131,7 @@ def classify(title: str, body: str, folder_hint: str = "") -> dict[str, Any]:
     )
 
     try:
-        client = openai.OpenAI(base_url=LM_STUDIO_BASE_URL, api_key="lm-studio")
+        client = _get_client()
         response = client.chat.completions.create(
             model=LM_STUDIO_MODEL,
             messages=[

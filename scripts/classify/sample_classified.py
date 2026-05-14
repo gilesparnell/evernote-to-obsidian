@@ -199,6 +199,16 @@ def main() -> None:
         default=None,
         help="Random seed for reproducible sampling (useful when debugging).",
     )
+    parser.add_argument(
+        "--html",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="Write the sample as a self-contained HTML file at PATH "
+             "(with obsidian:// click-through links). Suppresses terminal "
+             "output. Suggested: ~/Documents/ObsidianVault/Personal/"
+             "sample_classified.html",
+    )
     args = parser.parse_args()
 
     filters = parse_filters(args.filter)
@@ -216,7 +226,14 @@ def main() -> None:
             f"(requested {args.n}).",
             file=sys.stderr,
         )
-    print(render_report(samples, args.vault))
+
+    if args.html is not None:
+        from scripts.classify.html_renderer import render_sample_html
+        html_text = render_sample_html(samples, args.vault)
+        args.html.write_text(html_text, encoding="utf-8")
+        print(f"Wrote {len(samples)} samples to {args.html}", file=sys.stderr)
+    else:
+        print(render_report(samples, args.vault))
 
 
 if __name__ == "__main__":
