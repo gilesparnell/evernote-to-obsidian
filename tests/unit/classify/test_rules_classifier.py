@@ -397,3 +397,135 @@ class TestAdditionalTitleRules:
     def test_yearly_title_is_management(self) -> None:
         result = classify("Yearly review prep", "", folder_hint="AWS")
         assert result["type"] == "management"
+
+
+class TestReviewQueueMinedRules:
+    """Rules mined from the chunk-3 AWS review queue (566 items). Each pattern
+    represented >= 8 review-queue notes — collectively ~32% of the queue.
+    These move recurring Evernote-shape artefacts from LM-burdened review
+    candidates to free rules-only auto-classification.
+    """
+
+    # --- Evernote web-clipper "Cursor and ..." (107 / 566 = 19% of queue) ---
+    # When the user clipped a web page or PDF via cursor selection, Evernote
+    # auto-prepended "Cursor and " to the title. These are clippings, not
+    # technical content — type: reference fits.
+    def test_cursor_and_title_is_reference(self) -> None:
+        result = classify(
+            "Cursor and 14 Maralinga Lease 2016 - realestate.com.au",
+            "",
+            folder_hint="AWS",
+        )
+        assert result["type"] == "reference"
+
+    def test_cursor_and_pdf_clipping_is_reference(self) -> None:
+        result = classify(
+            "Cursor and 140130AMD6 Amazon DMWall Production Quote.pdf",
+            "",
+            folder_hint="AWS",
+        )
+        assert result["type"] == "reference"
+
+    def test_cursor_alone_without_and_does_not_match(self) -> None:
+        # Defensive: a note literally about Cursor (the IDE) shouldn't be
+        # caught by this rule. The "and" suffix is required.
+        result = classify(
+            "Cursor IDE setup notes",
+            "AWS S3 deployment guide using Cursor editor",
+            folder_hint="AWS",
+        )
+        # Not the web-clipper rule — falls through to keyword scoring.
+        # Body has "aws" + "s3" (tech keywords from new rule below), so
+        # type may be 'technical', NOT 'reference'.
+        assert result["type"] != "reference"
+
+    # --- AWS service-name title prefix (EC2 alone = 37 / 566 = 7% of queue) ---
+    # Notes titled with a bare AWS service name are technical content by
+    # construction. EC2 was 37 occurrences; adding the broader cluster
+    # catches similar shapes (S3 Palantir.NN, Lambda foo, IAM bar).
+    def test_ec2_prefix_is_technical(self) -> None:
+        result = classify("EC2 Palantir.10", "", folder_hint="AWS")
+        assert result["type"] == "technical"
+        assert result["org"] == "Amazon"
+
+    def test_s3_prefix_is_technical(self) -> None:
+        result = classify("S3 bucket policy notes", "", folder_hint="AWS")
+        assert result["type"] == "technical"
+
+    def test_iam_prefix_is_technical(self) -> None:
+        result = classify("IAM role review", "", folder_hint="AWS")
+        assert result["type"] == "technical"
+
+    def test_lambda_prefix_is_technical(self) -> None:
+        result = classify("Lambda cold-start mitigation", "", folder_hint="AWS")
+        assert result["type"] == "technical"
+
+    def test_dynamodb_prefix_is_technical(self) -> None:
+        result = classify("DynamoDB capacity planning", "", folder_hint="AWS")
+        assert result["type"] == "technical"
+
+    def test_api_gateway_with_space_is_technical(self) -> None:
+        result = classify("API Gateway throttling", "", folder_hint="AWS")
+        assert result["type"] == "technical"
+
+    def test_aws_service_word_in_middle_does_not_match(self) -> None:
+        # The rule anchors to the start of the title to avoid over-firing.
+        # "Meeting about EC2" should still be a meeting from keywords.
+        result = classify(
+            "Meeting agenda items about EC2 capacity",
+            "standup meeting attendees agenda",
+            folder_hint="AWS",
+        )
+        assert result["type"] == "meeting"
+
+    # --- Numeric image filenames (21 / 566) — Evernote camera-export titles ---
+    # Pattern: 8+ digits then .jpg/.png/.heic. These are photo dumps with no
+    # textual body — auto-classify as reference so they leave the LM queue.
+    def test_numeric_jpg_filename_is_reference(self) -> None:
+        result = classify("03172015127.jpg", "", folder_hint="AWS")
+        assert result["type"] == "reference"
+
+    def test_numeric_heic_filename_is_reference(self) -> None:
+        result = classify("20180412093715.heic", "", folder_hint="AWS")
+        assert result["type"] == "reference"
+
+    def test_short_numeric_filename_does_not_match(self) -> None:
+        # Only filenames with 8+ digits (Evernote's camera-export shape).
+        # A 4-digit prefix like "1234 notes.jpg" shouldn't be auto-typed.
+        result = classify("1234 notes.jpg", "AWS S3 deployment", folder_hint="AWS")
+        # Should fall through to keyword scoring, not be rule-typed.
+        # Body has multiple Amazon-org keywords; type from keywords (technical or note).
+        assert result["type"] != "reference" or result["type"] == "technical"
+
+    # --- GoToWebinar (9+ / 566) — webinar screencap notes ---
+    def test_gotowebinar_title_is_reference(self) -> None:
+        result = classify("GoToWebinar Viewer.2", "", folder_hint="AWS")
+        assert result["type"] == "reference"
+
+    def test_gotowebinar_with_underscore_is_reference(self) -> None:
+        result = classify("GoToWebinar_ Talking_ Attendee 4", "", folder_hint="AWS")
+        assert result["type"] == "reference"
+
+    # --- Inbox email exports (8 / 566) — Evernote's email-to-Evernote feature ---
+    # Pattern: "Inbox – gilesparnell@gmail.com.N". The em-dash + email
+    # combination is the marker. The rule requires a dash separator so a
+    # legitimate note titled just "Inbox" or "Inbox cleanup plan" isn't
+    # caught.
+    def test_inbox_email_export_is_reference(self) -> None:
+        result = classify(
+            "Inbox – gilesparnell@gmail.com.1", "", folder_hint="AWS"
+        )
+        assert result["type"] == "reference"
+
+    def test_inbox_hyphen_email_export_is_reference(self) -> None:
+        # ASCII hyphen variant (not all exports preserve the em-dash).
+        result = classify(
+            "Inbox - giles@example.com", "", folder_hint="AWS"
+        )
+        assert result["type"] == "reference"
+
+    def test_bare_inbox_title_does_not_match(self) -> None:
+        # A note literally named "Inbox" without an email is allowed to
+        # fall through to content-based classification.
+        result = classify("Inbox", "task list for the week", folder_hint="")
+        assert result["type"] != "reference"

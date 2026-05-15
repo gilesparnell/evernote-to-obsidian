@@ -180,6 +180,34 @@ _TITLE_TYPE_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^\s*screenshot(?:\b|_)", re.IGNORECASE), "reference"),
     # Sales Kick-Off events.
     (re.compile(r"^\s*sko(?:\b|_)", re.IGNORECASE), "reference"),
+    # AWS service-name title prefix — bare-service-named notes are
+    # technical content by construction. Anchored to start so "Meeting
+    # about EC2" still resolves to meeting via keywords. Mined from
+    # chunk-3 review queue: EC2 alone was 37 / 566.
+    (re.compile(
+        r"^\s*("
+        r"EC2|S3|IAM|VPC|EKS|ECS|RDS|DynamoDB|CloudWatch|CloudFormation|"
+        r"Lambda|Athena|SageMaker|Redshift|Kinesis|SQS|SNS|Bedrock|Glue|"
+        r"Step\s+Functions|EventBridge|CodePipeline|CodeBuild|CodeDeploy|"
+        r"API\s+Gateway|ALB|ELB|NLB|Route\s*53|CloudFront|ElastiCache"
+        r")(?:\b|_)",
+        re.IGNORECASE,
+    ), "technical"),
+    # Evernote web-clipper artefacts. When the user clipped a PDF or URL
+    # via cursor selection, Evernote auto-prepended "Cursor and " to the
+    # title. These are clippings, not technical content — 107 / 566 of
+    # chunk-3 review queue.
+    (re.compile(r"^\s*cursor\s+and(?:\b|_)", re.IGNORECASE), "reference"),
+    # GoToWebinar screencap notes — 9+ / 566 of chunk-3 review queue.
+    (re.compile(r"^\s*gotowebinar(?:\b|_)", re.IGNORECASE), "reference"),
+    # Evernote "Inbox – email@host" email-to-Evernote exports. Requires
+    # a dash separator so a bare "Inbox" or "Inbox cleanup" stays free
+    # to fall through to keyword scoring. 8 / 566 of chunk-3 review queue.
+    (re.compile(r"^\s*inbox\s*[–\-]\s*", re.IGNORECASE), "reference"),
+    # Numeric image filenames (Evernote camera-export shape). 8+ digits
+    # then .jpg/.png/.heic — distinguishes "20180412093715.jpg" (yes)
+    # from "1234 notes.jpg" (no). 21 / 566 of chunk-3 review queue.
+    (re.compile(r"^\s*\d{8,}\.(?:jpe?g|png|heic|gif)\b", re.IGNORECASE), "reference"),
 ]
 
 # Confidence assigned when a title rule fires. Below 1.0 so a strong
