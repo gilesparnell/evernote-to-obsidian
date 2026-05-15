@@ -9,14 +9,18 @@ straight from the browser into the source note in Obsidian.
 
 Public API:
     render_review_queue_html(queue, vault, generated) -> str
+    render_review_queue_html_with_actions(vault) -> str
+    parse_review_queue_md(path) -> list[dict]
     render_sample_html(samples, vault) -> str
 """
 
 from __future__ import annotations
 
 import html
+import re
 import sys
 import urllib.parse
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -275,6 +279,269 @@ def render_review_queue_html(
 
     return _HTML_SHELL.format(
         title=html.escape(title), css=_CSS, meta=meta, body="".join(cards)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Review queue rendering with action buttons. Used by the review_server
+# helper at GET / — the buttons POST to /delete and /reclassify on the
+# same origin so file:// CORS rules don't apply.
+
+
+_ACTIONS_CSS = """
+.actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.actions button {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.actions button:hover {
+  background: rgba(255,255,255,0.10);
+  border-color: rgba(255,255,255,0.20);
+}
+.actions button.danger { color: var(--low); border-color: rgba(229,72,77,0.25); }
+.actions button.danger:hover { background: rgba(229,72,77,0.08); border-color: rgba(229,72,77,0.45); }
+.actions button.quick { color: var(--accent); border-color: rgba(56,191,160,0.25); }
+.actions button.quick:hover { background: rgba(56,191,160,0.08); border-color: rgba(56,191,160,0.45); }
+.card.done { opacity: 0.35; }
+.card.done .card-head a { text-decoration: line-through; }
+.done-badge {
+  color: var(--high);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 0;
+}
+.error-badge { color: var(--low); font-size: 12px; font-weight: 600; padding: 4px 0; }
+.banner {
+  background: rgba(56,191,160,0.10);
+  border: 1px solid rgba(56,191,160,0.25);
+  color: var(--text);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+.banner code { background: rgba(0,0,0,0.30); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+"""
+
+_ACTIONS_JS = r"""
+async function doDelete(card, path) {
+  if (!confirm('Move to Trash?\n\n' + path)) return;
+  try {
+    const r = await fetch('/delete', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path: path}),
+    });
+    const d = await r.json();
+    if (r.ok && d.ok) {
+      card.classList.add('done');
+      card.querySelector('.actions').innerHTML =
+        '<span class="done-badge">Moved to Trash</span>';
+    } else {
+      card.querySelector('.actions').insertAdjacentHTML(
+        'beforeend',
+        '<span class="error-badge">Delete failed: ' + (d.error || r.status) + '</span>');
+    }
+  } catch (e) { alert('Delete failed: ' + e); }
+}
+async function doReclassify(card, path, presetType, presetOrg) {
+  let type_ = presetType;
+  let org = presetOrg;
+  if (!type_) {
+    type_ = prompt(
+      'Type — one of:\n' +
+      'meeting / technical / reference / recipe / personal / note /\n' +
+      'interview / management / application / career / pattern /\n' +
+      'journal / project / person / company',
+      'reference');
+    if (!type_) return;
+  }
+  if (!org) {
+    org = prompt(
+      'Org — Amazon / T-Systems / TSC / Parnell Systems / Personal',
+      'Amazon');
+    if (!org) return;
+  }
+  try {
+    const r = await fetch('/reclassify', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path: path, type: type_, org: org}),
+    });
+    const d = await r.json();
+    if (r.ok && d.ok) {
+      card.classList.add('done');
+      card.querySelector('.actions').innerHTML =
+        '<span class="done-badge">Reclassified: ' + type_ + ' / ' + org + '</span>';
+    } else {
+      card.querySelector('.actions').insertAdjacentHTML(
+        'beforeend',
+        '<span class="error-badge">Reclassify failed: ' + (d.error || r.status) + '</span>');
+    }
+  } catch (e) { alert('Reclassify failed: ' + e); }
+}
+"""
+
+_HTML_SHELL_WITH_JS = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{title}</title>
+<style>{css}</style>
+</head>
+<body>
+<header>
+  <h1>{title}</h1>
+  <div class="meta">{meta}</div>
+</header>
+{body}
+<script>{js}</script>
+</body>
+</html>
+"""
+
+_REVIEW_ROW_RE = re.compile(
+    r"^\|\s+\[\[([^\]]+)\]\]\s+\|\s+(.+?)\s+\|\s+(.+?)\s+\|\s+([\d.]+)\s+\|\s+(.+?)\s+\|\s*$"
+)
+
+
+def parse_review_queue_md(path: Path) -> list[dict[str, Any]]:
+    """Reconstruct the queue dicts from a saved classification-review.md.
+
+    Inverse of the table emitted by classify_vault._format_review_queue.
+    Used by the review server to (re-)render HTML from disc state without
+    re-running classification.
+
+    Returns an empty list if the file doesn't exist or contains no rows.
+    """
+    if not path.exists():
+        return []
+    base = path.parent
+    queue: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("| [["):  # quick reject for headers + separators
+            continue
+        match = _REVIEW_ROW_RE.match(line)
+        if not match:
+            continue
+        rel_path, proposed_type, proposed_org, conf, reason = match.groups()
+        queue.append({
+            "path": base / rel_path,
+            "proposed_type": proposed_type.strip(),
+            "proposed_org": proposed_org.strip(),
+            "confidence": float(conf),
+            "reason": reason.strip(),
+        })
+    return queue
+
+
+def render_review_queue_html_with_actions(vault: Path) -> str:
+    """Render the review queue with Delete + Reclassify action buttons.
+
+    Buttons POST to /delete and /reclassify on the same origin — meant
+    to be served by review_server.py, NOT opened as a static file.
+    """
+    review_md = vault / "classification-review.md"
+    queue = parse_review_queue_md(review_md)
+    vault_name = vault.name
+    title = "Classification Review · Triage"
+    generated = datetime.now().strftime("%Y-%m-%d %H:%M")
+    meta = (
+        f"{len(queue)} notes &middot; vault: {html.escape(vault_name)}"
+        f" &middot; rendered: {generated}"
+    )
+
+    css = _CSS + _ACTIONS_CSS
+    if not queue:
+        body = (
+            '<div class="empty">'
+            "Review queue is empty. Nothing to triage."
+            "</div>"
+        )
+        return _HTML_SHELL_WITH_JS.format(
+            title=html.escape(title), css=css, meta=meta,
+            body=body, js="",
+        )
+
+    cards: list[str] = []
+    cards.append(
+        '<div class="banner">'
+        "Click <strong>Delete</strong> to move a note to Trash (recoverable "
+        "via Finder). Click <strong>Reclassify</strong> to write R2 "
+        "frontmatter directly. Both actions log to <code>"
+        ".classify_deletions.log</code> / <code>.classify_reclassifications.log"
+        "</code> in the vault root."
+        "</div>"
+    )
+    cards.append(
+        f'<div class="summary">{len(queue)} notes need manual review. '
+        "Click a note title to open it in Obsidian.</div>"
+    )
+    for item in queue:
+        note_path: Path = item["path"]
+        rel = _relative_to_vault(note_path, vault)
+        rel_str = str(rel)
+        url = _obsidian_url(vault_name, rel)
+        conf = float(item["confidence"])
+        klass = _confidence_class(conf)
+        excerpt = _body_excerpt(note_path)
+        # JS string-escape the path for the inline onclick handlers.
+        js_path = (
+            rel_str.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "")
+        )
+        proposed_type = str(item.get("proposed_type", "?"))
+        proposed_org = str(item.get("proposed_org", "?"))
+
+        cards.append(
+            f'<article class="card">'
+            f'  <div class="card-head">'
+            f'    <a href="{html.escape(url, quote=True)}">'
+            f'{html.escape(rel_str)}</a>'
+            f'    <span class="confidence {klass}">{conf:.2f}</span>'
+            f'  </div>'
+            f'  <div class="fields">'
+            f'    <span><strong>type:</strong> {html.escape(proposed_type)}</span>'
+            f'    <span><strong>org:</strong> {html.escape(proposed_org)}</span>'
+            f'  </div>'
+            f'  <div class="reason">{html.escape(str(item.get("reason", "")))}</div>'
+            + (
+                f'  <pre class="excerpt">{html.escape(excerpt)}</pre>'
+                if excerpt else ""
+            )
+            + f'  <div class="actions">'
+            f'    <button class="danger" '
+            f'onclick="doDelete(this.closest(\'.card\'),\'{js_path}\')">'
+            f'Delete</button>'
+            f'    <button '
+            f'onclick="doReclassify(this.closest(\'.card\'),\'{js_path}\')">'
+            f'Reclassify…</button>'
+            f'    <button class="quick" '
+            f'onclick="doReclassify(this.closest(\'.card\'),\'{js_path}\','
+            f'\'reference\',\'Personal\')">'
+            f'Quick: reference / Personal</button>'
+            f'    <button class="quick" '
+            f'onclick="doReclassify(this.closest(\'.card\'),\'{js_path}\','
+            f'\'technical\',\'Amazon\')">'
+            f'Quick: technical / Amazon</button>'
+            f'  </div>'
+            f'</article>'
+        )
+
+    return _HTML_SHELL_WITH_JS.format(
+        title=html.escape(title), css=css, meta=meta,
+        body="".join(cards), js=_ACTIONS_JS,
     )
 
 
