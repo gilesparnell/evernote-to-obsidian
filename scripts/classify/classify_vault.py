@@ -40,29 +40,12 @@ if str(_REPO_ROOT) not in sys.path:
 
 from scripts.classify import frontmatter as _fm
 from scripts.classify import lm_classifier, rules_classifier
+from scripts.classify.moc_map import UP_MAP, up_for_type  # noqa: F401 re-exported
 
 CONFIDENCE_THRESHOLD = 0.80
 DEFAULT_CHECKPOINT_INTERVAL = 50
 ICLOUD_SLEEP_SECONDS = 0.05
 MIN_BODY_LENGTH = 50
-
-UP_MAP: dict[str, str] = {
-    "meeting": "[[Meetings]]",
-    "technical": "[[Technical]]",
-    "reference": "[[Reference]]",
-    "person": "[[People]]",
-    "company": "[[Companies]]",
-    "recipe": "[[Personal]]",
-    "journal": "[[Personal]]",
-    "personal": "[[Personal]]",
-    "note": "[[Personal]]",
-    "project": "[[Projects]]",
-    "interview": "[[Interview Prep]]",
-    "management": "[[Leadership]]",
-    "application": "[[Job Hunt]]",
-    "career": "[[Career]]",
-    "pattern": "[[Patterns]]",
-}
 
 _FRONTMATTER_STRIP_RE = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)
 _REVIEW_FILENAME = "classification-review.md"
@@ -78,11 +61,6 @@ _AEST = timezone(timedelta(hours=10))  # Australia/Sydney standard time
 # vault root is not affected.
 _SKIP_TOP_LEVEL_EXACT: frozenset[str] = frozenset({"wiki"})
 _SKIP_TOP_LEVEL_PREFIX: tuple[str, ...] = ("Personal-backup",)
-
-
-def up_for_type(type_value: str) -> str:
-    """Return the MOC wikilink for a type, falling back to [[Personal]]."""
-    return UP_MAP.get(type_value, "[[Personal]]")
 
 
 def _progress_total(scan_size: int, limit: int | None) -> int:

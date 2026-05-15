@@ -35,6 +35,42 @@ def _write_note(path: Path, body: str = "x") -> None:
 
 
 # ---------------------------------------------------------------------------
+# Module-level import surface — the review server should boot fast (it's
+# launched manually for ad-hoc triage) and must not transitively pull in
+# the LM SDK just to look up a wikilink. Regression: importing classify_vault
+# at top-level dragged in openai -> httpx -> 30+ modules, making startup
+# slow enough that the operator hit Ctrl-C thinking it was hung.
+
+
+class TestReviewServerImportSurface:
+    def test_importing_review_server_does_not_load_openai_sdk(self) -> None:
+        # Spawn a fresh subprocess so cached imports from the test runner
+        # don't pollute the check.
+        import subprocess
+        import sys as _sys
+        result = subprocess.run(
+            [
+                _sys.executable, "-c",
+                "import sys\n"
+                "from scripts.classify import review_server  # noqa: F401\n"
+                "leaks = sorted(\n"
+                "    m for m in sys.modules\n"
+                "    if m == 'openai' or m.startswith(('openai.', 'httpx', 'httpx.'))\n"
+                ")\n"
+                "assert not leaks, 'unexpected heavy imports: ' + str(leaks)\n",
+            ],
+            cwd=str(Path(__file__).resolve().parents[3]),
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        assert result.returncode == 0, (
+            f"review_server import leaked LM SDK transitively:\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Path resolution — the security gate. Every other helper trusts the path
 # coming back from this function to be inside the vault.
 

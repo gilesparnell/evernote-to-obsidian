@@ -35,8 +35,8 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.classify.classify_vault import UP_MAP, up_for_type  # noqa: E402
 from scripts.classify.frontmatter import write_frontmatter  # noqa: E402
+from scripts.classify.moc_map import UP_MAP, up_for_type  # noqa: E402
 from scripts.classify.rules_classifier import ORG_KEYWORDS  # noqa: E402
 
 

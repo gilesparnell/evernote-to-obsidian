@@ -13,9 +13,10 @@ Each entry is split into:
 
 ---
 
-## [0.2.0 → 0.2.2] — 2026-05-15
+## [0.2.0 → 0.2.3] — 2026-05-15
 
 ### What's new
+- **Review server starts in under a second.** Earlier versions took multiple seconds to start because the import chain dragged in the LM SDK (openai → httpx → ~30 transitive modules) just to look up a wikilink. The server now imports only what it needs.
 - **Triage page auto-prunes already-actioned rows on refresh.** Cards for notes you've already deleted or reclassified disappear from the page on the next refresh — no more visual clutter, no more 404s when you click an already-trashed row. The header shows "N pending · M already actioned (hidden)" so you can see how much you've gotten through.
 - **Multi-select bulk delete in the triage UI.** Each card now has a checkbox; tick several, then click "Delete selected" in the floating toolbar to trash them in one batch. "Select all" / "Clear selection" controls at the top of the page. Partial failures (a file that's already been moved by another action, or a path edge case) surface in an alert without rolling back the batch — what could be deleted, is.
 - **In-browser triage with one-click delete + reclassify.** New helper server reads the review queue and serves it back with action buttons on every card — no more leaving the page to fix a misclassification. Deletes go to macOS Trash (recoverable via Finder), not `rm`. Both actions append to per-vault audit logs.
@@ -34,7 +35,8 @@ Each entry is split into:
 - `scripts/classify/html_renderer.py`: adds `render_review_queue_html_with_actions` and `parse_review_queue_md` for the review server's GET /. Self-contained dark theme. Per-card action buttons (single Delete / Reclassify / Quick-reclassify) plus a multi-select layer: `.select-checkbox` on every card, a floating `.selection-toolbar` that appears once anything is ticked, and a vanilla-JS `doDeleteSelected` handler that POSTs to `/delete-bulk` and fades the moved cards in place. "Select all" / "Clear selection" controls at the top of the queue. `parse_review_queue_md` now takes a `skip_acted_on=False` kwarg; the renderer passes `True` so rows whose file is gone or already has full R2 frontmatter are pruned on each refresh (rendered count + a "M already actioned (hidden)" note in the header).
 - New CLIs: `scripts/classify/fix_evernote_titles.py`, `scripts/classify/sample_classified.py` (with `--html`), `scripts/classify/review_server.py`.
 - Docs: `docs/operator-reference.html` (single-page reference for every CLI flag and progress-bar field), `docs/RUNBOOK.md` cross-reference, `docs/index.html` bento card swap (Operator reference replaces stale Ollama-era classifier-source card).
-- Tests: 209 → 342 passing (133 added across this cycle: rules-mining +18, helper server +20, race tolerance +3, bulk delete +10, queue auto-prune +5).
+- New module `scripts/classify/moc_map.py` (pure data + lookup fn). UP_MAP / up_for_type extracted out of `classify_vault.py` so consumers that don't need the full classifier (e.g. `review_server`) can import them without transitively loading `lm_classifier` → `openai` → `httpx`. `classify_vault.py` re-exports for back-compat. Subprocess regression test asserts `openai` / `httpx` are not in `sys.modules` after `import scripts.classify.review_server`.
+- Tests: 209 → 351 passing (142 added across this cycle: rules-mining +18, helper server +20, race tolerance +3, bulk delete +10, queue auto-prune +5, moc_map extraction +9).
 
 ---
 
