@@ -333,6 +333,63 @@ _ACTIONS_CSS = """
   margin-bottom: 16px;
 }
 .banner code { background: rgba(0,0,0,0.30); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+.select-checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 0 10px 0 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+.card.done .select-checkbox { opacity: 0.3; pointer-events: none; }
+.selection-toolbar {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(18, 21, 28, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+  backdrop-filter: blur(10px);
+  z-index: 10;
+}
+.selection-toolbar[hidden] { display: none; }
+.selection-toolbar .selection-count { color: var(--text); font-size: 13px; font-weight: 500; }
+.selection-toolbar .selection-count strong { color: var(--accent); font-weight: 700; }
+.selection-toolbar button {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.selection-toolbar button:hover { background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.20); }
+.selection-toolbar button.danger { color: var(--low); border-color: rgba(229,72,77,0.30); }
+.selection-toolbar button.danger:hover { background: rgba(229,72,77,0.10); border-color: rgba(229,72,77,0.50); }
+.select-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.select-controls button {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.select-controls button:hover { color: var(--text); border-color: rgba(255,255,255,0.18); }
 """
 
 _ACTIONS_JS = r"""
@@ -391,6 +448,63 @@ async function doReclassify(card, path, presetType, presetOrg) {
         '<span class="error-badge">Reclassify failed: ' + (d.error || r.status) + '</span>');
     }
   } catch (e) { alert('Reclassify failed: ' + e); }
+}
+
+// ---- multi-select bulk delete --------------------------------------------
+
+function _selectedPaths() {
+  const out = [];
+  document.querySelectorAll('.select-checkbox:checked').forEach(cb => {
+    if (!cb.closest('.card').classList.contains('done')) {
+      out.push(cb.dataset.path);
+    }
+  });
+  return out;
+}
+function onSelectionChange() {
+  const count = _selectedPaths().length;
+  const toolbar = document.getElementById('selection-toolbar');
+  document.getElementById('selection-count').textContent = count;
+  toolbar.hidden = count === 0;
+}
+function clearSelection() {
+  document.querySelectorAll('.select-checkbox:checked').forEach(cb => cb.checked = false);
+  onSelectionChange();
+}
+function selectAllVisible() {
+  document.querySelectorAll('.card:not(.done) .select-checkbox').forEach(cb => cb.checked = true);
+  onSelectionChange();
+}
+async function doDeleteSelected() {
+  const paths = _selectedPaths();
+  if (paths.length === 0) return;
+  if (!confirm('Move ' + paths.length + ' note(s) to Trash?\n\nRecoverable from Finder.')) return;
+  try {
+    const r = await fetch('/delete-bulk', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({paths: paths}),
+    });
+    const d = await r.json();
+    if (r.ok) {
+      (d.moved || []).forEach(p => {
+        const cb = document.querySelector('.select-checkbox[data-path="' + p.replace(/"/g, '\\"') + '"]');
+        if (!cb) return;
+        const card = cb.closest('.card');
+        card.classList.add('done');
+        const actions = card.querySelector('.actions');
+        if (actions) actions.innerHTML = '<span class="done-badge">Moved to Trash</span>';
+        cb.checked = false;
+      });
+      if (d.errors && d.errors.length) {
+        const summary = d.errors.map(e => '• ' + e.path + ' — ' + e.error).join('\n');
+        alert('Some files could not be deleted:\n\n' + summary);
+      }
+      onSelectionChange();
+    } else {
+      alert('Bulk delete failed: ' + (d.error || r.status));
+    }
+  } catch (e) { alert('Bulk delete failed: ' + e); }
 }
 """
 
@@ -478,16 +592,33 @@ def render_review_queue_html_with_actions(vault: Path) -> str:
     cards: list[str] = []
     cards.append(
         '<div class="banner">'
-        "Click <strong>Delete</strong> to move a note to Trash (recoverable "
-        "via Finder). Click <strong>Reclassify</strong> to write R2 "
-        "frontmatter directly. Both actions log to <code>"
-        ".classify_deletions.log</code> / <code>.classify_reclassifications.log"
-        "</code> in the vault root."
+        "Tick the box on any card to select it. Pick several, then click "
+        "<strong>Delete selected</strong> in the floating toolbar to trash "
+        "them in one batch. Per-card <strong>Delete</strong> / "
+        "<strong>Reclassify</strong> buttons still work for single actions. "
+        "All deletions land in <code>~/.Trash</code> (recoverable from "
+        "Finder) and log to <code>.classify_deletions.log</code> / <code>"
+        ".classify_reclassifications.log</code> in the vault root."
         "</div>"
     )
     cards.append(
         f'<div class="summary">{len(queue)} notes need manual review. '
         "Click a note title to open it in Obsidian.</div>"
+    )
+    cards.append(
+        '<div class="select-controls">'
+        '<button type="button" onclick="selectAllVisible()">Select all</button>'
+        '<button type="button" onclick="clearSelection()">Clear selection</button>'
+        '</div>'
+    )
+    cards.append(
+        '<div class="selection-toolbar" id="selection-toolbar" hidden>'
+        '<span class="selection-count">'
+        '<strong id="selection-count">0</strong> selected</span>'
+        '<button type="button" onclick="clearSelection()">Clear</button>'
+        '<button type="button" class="danger" onclick="doDeleteSelected()">'
+        'Delete selected</button>'
+        '</div>'
     )
     for item in queue:
         note_path: Path = item["path"]
@@ -504,9 +635,14 @@ def render_review_queue_html_with_actions(vault: Path) -> str:
         proposed_type = str(item.get("proposed_type", "?"))
         proposed_org = str(item.get("proposed_org", "?"))
 
+        # HTML-attribute-escape the path for the data-path attribute.
+        attr_path = html.escape(rel_str, quote=True)
         cards.append(
             f'<article class="card">'
             f'  <div class="card-head">'
+            f'    <input type="checkbox" class="select-checkbox" '
+            f'data-path="{attr_path}" onchange="onSelectionChange()" '
+            f'aria-label="Select this note">'
             f'    <a href="{html.escape(url, quote=True)}">'
             f'{html.escape(rel_str)}</a>'
             f'    <span class="confidence {klass}">{conf:.2f}</span>'

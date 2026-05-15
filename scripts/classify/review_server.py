@@ -154,6 +154,52 @@ def trash_note(
     }
 
 
+def bulk_trash_notes(
+    vault: Path,
+    paths: list[str],
+    trash_root: Path | None = None,
+) -> dict[str, Any]:
+    """Trash multiple notes best-effort. Per-path failures (file missing,
+    path-escape) are collected as errors; the batch keeps going.
+
+    Returns:
+        {
+            "ok": bool,           # True iff at least one file moved
+            "moved_count": int,
+            "moved": [<rel-path>, ...],
+            "errors": [{"path": <input>, "error": <msg>}, ...],
+        }
+
+    Raises ``ValueError`` if ``paths`` is empty — callers must filter
+    out the zero-selection case before hitting this function.
+    """
+    if not paths:
+        raise ValueError("paths must be non-empty")
+
+    moved: list[str] = []
+    errors: list[dict[str, str]] = []
+
+    for raw_path in paths:
+        try:
+            resolved = resolve_vault_path(vault, raw_path)
+        except InvalidPath as e:
+            errors.append({"path": raw_path, "error": str(e)})
+            continue
+        try:
+            trash_note(vault=vault, note_path=resolved, trash_root=trash_root)
+        except FileNotFoundError:
+            errors.append({"path": raw_path, "error": "file not found"})
+            continue
+        moved.append(raw_path)
+
+    return {
+        "ok": len(moved) > 0,
+        "moved_count": len(moved),
+        "moved": moved,
+        "errors": errors,
+    }
+
+
 def apply_reclassification(
     vault: Path, note_path: Path, type_: str, org: str,
 ) -> dict[str, Any]:
@@ -261,6 +307,8 @@ class _Handler(BaseHTTPRequestHandler):
 
         if self.path == "/delete":
             self._handle_delete(body)
+        elif self.path == "/delete-bulk":
+            self._handle_delete_bulk(body)
         elif self.path == "/reclassify":
             self._handle_reclassify(body)
         else:
@@ -279,6 +327,23 @@ class _Handler(BaseHTTPRequestHandler):
             )
         except FileNotFoundError:
             self._send_json(404, {"ok": False, "error": "file not found"})
+            return
+        self._send_json(200, result)
+
+    def _handle_delete_bulk(self, body: dict[str, Any]) -> None:
+        paths = body.get("paths")
+        if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+            self._send_json(
+                400, {"ok": False, "error": "body must be {\"paths\": [str, ...]}"},
+            )
+            return
+        try:
+            result = bulk_trash_notes(
+                vault=self.vault, paths=paths, trash_root=self.trash_root,
+            )
+        except ValueError as e:
+            # Empty list reached the helper — surface as 400.
+            self._send_json(400, {"ok": False, "error": str(e)})
             return
         self._send_json(200, result)
 

@@ -22,6 +22,7 @@ from scripts.classify.review_server import (
     InvalidPath,
     InvalidReclassification,
     apply_reclassification,
+    bulk_trash_notes,
     resolve_vault_path,
     start_server,
     trash_note,
@@ -138,6 +139,119 @@ class TestTrashNote:
         ghost = vault / "ghost.md"
         with pytest.raises(FileNotFoundError):
             trash_note(vault=vault, note_path=ghost, trash_root=trash_root)
+
+
+# ---------------------------------------------------------------------------
+# Bulk delete — best-effort across a list of paths. Per-path failures (missing
+# file, path escape) are collected as errors; the batch continues. Used by the
+# multi-select Delete in the triage UI.
+
+
+class TestBulkTrashNotes:
+    def test_moves_all_valid_files_and_returns_summary(self, tmp_path: Path) -> None:
+        vault = tmp_path / "vault"
+        for name in ("a.md", "b.md", "c.md"):
+            _write_note(vault / "Evernote" / "notes" / "AWS" / name, body=name)
+        trash_root = tmp_path / "trash"
+
+        result = bulk_trash_notes(
+            vault=vault,
+            paths=[
+                "Evernote/notes/AWS/a.md",
+                "Evernote/notes/AWS/b.md",
+                "Evernote/notes/AWS/c.md",
+            ],
+            trash_root=trash_root,
+        )
+
+        assert result["ok"] is True
+        assert result["moved_count"] == 3
+        assert len(result["moved"]) == 3
+        assert result["errors"] == []
+        # All three are in the trash root
+        assert len(list(trash_root.rglob("*.md"))) == 3
+
+    def test_partial_failure_returns_per_path_errors(self, tmp_path: Path) -> None:
+        vault = tmp_path / "vault"
+        _write_note(vault / "Evernote" / "notes" / "AWS" / "real.md", body="x")
+        trash_root = tmp_path / "trash"
+
+        result = bulk_trash_notes(
+            vault=vault,
+            paths=[
+                "Evernote/notes/AWS/real.md",
+                "Evernote/notes/AWS/ghost.md",  # never written
+            ],
+            trash_root=trash_root,
+        )
+
+        assert result["ok"] is True  # at least one moved
+        assert result["moved_count"] == 1
+        assert len(result["moved"]) == 1
+        assert len(result["errors"]) == 1
+        assert result["errors"][0]["path"] == "Evernote/notes/AWS/ghost.md"
+        assert "not found" in result["errors"][0]["error"].lower()
+
+    def test_path_traversal_in_batch_returns_per_path_error(
+        self, tmp_path: Path,
+    ) -> None:
+        vault = tmp_path / "vault"
+        _write_note(vault / "real.md")
+        trash_root = tmp_path / "trash"
+
+        result = bulk_trash_notes(
+            vault=vault,
+            paths=["real.md", "../../etc/passwd"],
+            trash_root=trash_root,
+        )
+
+        assert result["moved_count"] == 1
+        assert len(result["errors"]) == 1
+        # The escape attempt is reported, the real file still moves.
+        assert "escapes vault" in result["errors"][0]["error"]
+
+    def test_empty_list_raises_value_error(self, tmp_path: Path) -> None:
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        with pytest.raises(ValueError):
+            bulk_trash_notes(
+                vault=vault, paths=[], trash_root=tmp_path / "trash",
+            )
+
+    def test_writes_one_audit_line_per_moved_file(self, tmp_path: Path) -> None:
+        vault = tmp_path / "vault"
+        for name in ("a.md", "b.md"):
+            _write_note(vault / name, body=name)
+        trash_root = tmp_path / "trash"
+
+        bulk_trash_notes(
+            vault=vault,
+            paths=["a.md", "b.md"],
+            trash_root=trash_root,
+        )
+
+        log_lines = (vault / ".classify_deletions.log").read_text(
+            encoding="utf-8",
+        ).splitlines()
+        # Each moved file gets exactly one audit line.
+        assert sum(1 for ln in log_lines if "MOVED a.md" in ln) == 1
+        assert sum(1 for ln in log_lines if "MOVED b.md" in ln) == 1
+
+    def test_all_failures_returns_ok_false(self, tmp_path: Path) -> None:
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        trash_root = tmp_path / "trash"
+
+        result = bulk_trash_notes(
+            vault=vault,
+            paths=["ghost1.md", "ghost2.md"],
+            trash_root=trash_root,
+        )
+
+        # Nothing was moved — top-level ok flips to False.
+        assert result["ok"] is False
+        assert result["moved_count"] == 0
+        assert len(result["errors"]) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -303,3 +417,71 @@ class TestHttpEndpoints:
         )
         assert code == 400
         assert data["ok"] is False
+
+    def test_delete_bulk_endpoint_moves_multiple_files(self, running_server) -> None:
+        # Write a couple more notes alongside the fixture's delete-me.md
+        vault: Path = running_server["vault"]
+        for name in ("b.md", "c.md"):
+            _write_note(vault / "Evernote" / "notes" / "AWS" / name, body=name)
+
+        code, data = _post_json(
+            running_server["base"] + "/delete-bulk",
+            {"paths": [
+                "Evernote/notes/AWS/delete-me.md",
+                "Evernote/notes/AWS/b.md",
+                "Evernote/notes/AWS/c.md",
+            ]},
+        )
+        assert code == 200
+        assert data["ok"] is True
+        assert data["moved_count"] == 3
+        assert not running_server["note"].exists()
+        assert not (vault / "Evernote" / "notes" / "AWS" / "b.md").exists()
+
+    def test_delete_bulk_endpoint_partial_failure_returns_per_path_status(
+        self, running_server,
+    ) -> None:
+        code, data = _post_json(
+            running_server["base"] + "/delete-bulk",
+            {"paths": [
+                "Evernote/notes/AWS/delete-me.md",
+                "Evernote/notes/AWS/ghost-never-existed.md",
+            ]},
+        )
+        assert code == 200
+        assert data["moved_count"] == 1
+        assert len(data["errors"]) == 1
+        assert (
+            data["errors"][0]["path"]
+            == "Evernote/notes/AWS/ghost-never-existed.md"
+        )
+
+    def test_delete_bulk_endpoint_empty_list_returns_400(self, running_server) -> None:
+        code, data = _post_json(
+            running_server["base"] + "/delete-bulk",
+            {"paths": []},
+        )
+        assert code == 400
+        assert data["ok"] is False
+
+    def test_root_renders_review_page_with_multiselect_toolbar(
+        self, running_server,
+    ) -> None:
+        # Seed a minimal review.md so the renderer has something to show.
+        review = running_server["vault"] / "classification-review.md"
+        review.write_text(
+            "# Classification Review Queue\n"
+            "Generated: 2026-05-15\n\n"
+            "| Note | Proposed type | Proposed org | Confidence | Reason |\n"
+            "|------|---------------|--------------|------------|--------|\n"
+            "| [[Evernote/notes/AWS/delete-me.md]] | note | Amazon | 0.40 |"
+            " low confidence |\n",
+            encoding="utf-8",
+        )
+        with urllib.request.urlopen(running_server["base"] + "/", timeout=3) as resp:
+            html_body = resp.read().decode("utf-8")
+        # Multi-select toolbar + per-card checkbox + bulk handler all present.
+        assert "selection-toolbar" in html_body
+        assert 'class="select-checkbox"' in html_body
+        assert "doDeleteSelected" in html_body
+        assert "delete-bulk" in html_body
