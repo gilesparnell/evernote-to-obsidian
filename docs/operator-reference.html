@@ -196,6 +196,7 @@
       <li><a href="#migrate-vault">migrate_vault.py</a></li>
       <li><a href="#progress-bar">Progress bar field reference</a></li>
       <li><a href="#review-output">Reviewing the output</a></li>
+      <li><a href="#triage-types">Triage type &amp; org reference</a></li>
       <li><a href="#decision-gates">Decision gates</a></li>
     </ol>
   </nav>
@@ -523,9 +524,60 @@ open ~/Documents/ObsidianVault/Personal/sample_classified.html</code></pre>
     </div>
   </section>
 
+  <!-- Triage type & org reference -->
+  <section class="section" id="triage-types">
+    <div class="section-label">8 · While triaging the review queue</div>
+    <h2>Triage type &amp; org reference</h2>
+    <p class="intro">When you click <strong>Reclassify…</strong> on a card, the prompts ask for a <code>type</code> and an <code>org</code>. These are the canonical values the classifier understands — anything outside the whitelist is rejected. Pick by <em>content</em>, not by <em>folder</em> (lots of personal notes will sit in <code>Evernote/notes/AWS/</code> because that was your default Evernote notebook for 13 years).</p>
+
+    <p class="intro" style="margin-top:0.6rem">Three decisions per row: <strong>Delete</strong> (junk / duplicate / clipping residue), <strong>Reclassify</strong> (valuable but mis-typed), or <strong>Skip</strong> (do nothing — leave it for a second look). Auto-prune drops rows you've already actioned on the next refresh.</p>
+
+    <h3 style="font-family:var(--font-display);font-weight:800;font-size:1.1rem;letter-spacing:-0.015em;margin:1.4rem 0 0.6rem">Type values (15)</h3>
+    <div class="prereqs">
+      <table>
+        <thead><tr><th>Type</th><th>Routes to MOC</th><th>Use for</th></tr></thead>
+        <tbody>
+          <tr><td class="cmd">meeting</td><td class="cmd">[[Meetings]]</td><td class="check">Real meeting notes, standups, 1-1s, sync notes</td></tr>
+          <tr><td class="cmd">technical</td><td class="cmd">[[Technical]]</td><td class="check">AWS architecture, design docs, RFCs, deep-dives</td></tr>
+          <tr><td class="cmd">reference</td><td class="cmd">[[Reference]]</td><td class="check">Cheatsheets, summit / conference notes, summaries, third-party clippings</td></tr>
+          <tr><td class="cmd">interview</td><td class="cmd">[[Interview Prep]]</td><td class="check">Interview prep, STAR stories, behavioural answers</td></tr>
+          <tr><td class="cmd">management</td><td class="cmd">[[Leadership]]</td><td class="check">OLR / PIP, calibration, performance reviews, team-health docs</td></tr>
+          <tr><td class="cmd">application</td><td class="cmd">[[Job Hunt]]</td><td class="check">Job applications, recruiter chats, role research</td></tr>
+          <tr><td class="cmd">career</td><td class="cmd">[[Career]]</td><td class="check">CV, career timeline, achievements summary</td></tr>
+          <tr><td class="cmd">pattern</td><td class="cmd">[[Patterns]]</td><td class="check">Architecture patterns (CQRS, saga, hexagonal, etc.)</td></tr>
+          <tr><td class="cmd">personal</td><td class="cmd">[[Personal]]</td><td class="check">Anything personal-life: travel, hobbies, photos with context, journal</td></tr>
+          <tr><td class="cmd">note</td><td class="cmd">[[Personal]]</td><td class="check">Catch-all — only use when nothing else fits. Try to avoid.</td></tr>
+          <tr><td class="cmd">recipe</td><td class="cmd">[[Personal]]</td><td class="check">Cooking</td></tr>
+          <tr><td class="cmd">journal</td><td class="cmd">[[Personal]]</td><td class="check">Diary entries</td></tr>
+          <tr><td class="cmd">project</td><td class="cmd">[[Projects]]</td><td class="check">Side projects, ongoing build threads</td></tr>
+          <tr><td class="cmd">person</td><td class="cmd">[[People]]</td><td class="check">Notes ABOUT a person (background, history)</td></tr>
+          <tr><td class="cmd">company</td><td class="cmd">[[Companies]]</td><td class="check">Notes ABOUT a company</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 style="font-family:var(--font-display);font-weight:800;font-size:1.1rem;letter-spacing:-0.015em;margin:1.6rem 0 0.6rem">Org values (5)</h3>
+    <div class="prereqs">
+      <table>
+        <thead><tr><th>Org</th><th>Sets context</th><th>Use for</th></tr></thead>
+        <tbody>
+          <tr><td class="cmd">Amazon</td><td class="cmd">work</td><td class="check">Anything AWS / Amazon work content</td></tr>
+          <tr><td class="cmd">T-Systems</td><td class="cmd">work</td><td class="check">Prior employer (Deutsche Telekom subsidiary)</td></tr>
+          <tr><td class="cmd">TSC</td><td class="cmd">work</td><td class="check">Transport Systems Catapult</td></tr>
+          <tr><td class="cmd">Parnell Systems</td><td class="cmd">work</td><td class="check">Your own company</td></tr>
+          <tr><td class="cmd">Personal</td><td class="cmd">personal</td><td class="check">Anything not work-related</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cross-link" style="margin-top:1.5rem">
+      The two <strong>Quick:</strong> shortcut buttons on each review card pre-fill the most common decisions: <code>Quick: reference / Personal</code> for web-clippings and AfrikaBurn-style personal content sitting in the AWS folder, and <code>Quick: technical / Amazon</code> for real AWS notes that fell below the 0.80 confidence gate. For anything else, use <strong>Reclassify…</strong> and pick from the tables above.
+    </div>
+  </section>
+
   <!-- Decision gates -->
   <section class="section" id="decision-gates">
-    <div class="section-label">8 · When to stop and tune</div>
+    <div class="section-label">9 · When to stop and tune</div>
     <h2>Decision gates between chunks</h2>
     <p class="intro">Three signals that mean "stop the run, don't just keep chunking". If you ignore them and barrel on, you'll create review-queue debt or miscategorised notes you'll regret later.</p>
 
