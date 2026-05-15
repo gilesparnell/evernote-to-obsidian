@@ -28,7 +28,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.classify.frontmatter import read_frontmatter  # noqa: E402
+from scripts.classify.frontmatter import is_classified, read_frontmatter  # noqa: E402
 
 _BODY_EXCERPT_CHARS = 400
 
@@ -531,14 +531,24 @@ _REVIEW_ROW_RE = re.compile(
 )
 
 
-def parse_review_queue_md(path: Path) -> list[dict[str, Any]]:
+def parse_review_queue_md(
+    path: Path, skip_acted_on: bool = False,
+) -> list[dict[str, Any]]:
     """Reconstruct the queue dicts from a saved classification-review.md.
 
     Inverse of the table emitted by classify_vault._format_review_queue.
     Used by the review server to (re-)render HTML from disc state without
     re-running classification.
 
-    Returns an empty list if the file doesn't exist or contains no rows.
+    Args:
+        path: location of classification-review.md
+        skip_acted_on: when True, prune rows whose underlying file has
+            been deleted (not on disc) or already classified
+            (full R2 frontmatter present). Used by the triage UI so
+            already-handled rows disappear on refresh.
+
+    Returns an empty list if the file doesn't exist or all rows
+    were pruned.
     """
     if not path.exists():
         return []
@@ -551,8 +561,14 @@ def parse_review_queue_md(path: Path) -> list[dict[str, Any]]:
         if not match:
             continue
         rel_path, proposed_type, proposed_org, conf, reason = match.groups()
+        note_path = base / rel_path
+        if skip_acted_on:
+            if not note_path.exists():
+                continue  # deleted by the operator (e.g. moved to Trash)
+            if is_classified(note_path):
+                continue  # manually reclassified — full R2 frontmatter set
         queue.append({
-            "path": base / rel_path,
+            "path": note_path,
             "proposed_type": proposed_type.strip(),
             "proposed_org": proposed_org.strip(),
             "confidence": float(conf),
@@ -568,14 +584,22 @@ def render_review_queue_html_with_actions(vault: Path) -> str:
     to be served by review_server.py, NOT opened as a static file.
     """
     review_md = vault / "classification-review.md"
-    queue = parse_review_queue_md(review_md)
+    # skip_acted_on=True: hide rows whose file has been deleted or
+    # already classified so the page auto-prunes on each refresh.
+    queue_all = parse_review_queue_md(review_md, skip_acted_on=False)
+    queue = parse_review_queue_md(review_md, skip_acted_on=True)
+    acted_on = len(queue_all) - len(queue)
     vault_name = vault.name
     title = "Classification Review · Triage"
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
-    meta = (
-        f"{len(queue)} notes &middot; vault: {html.escape(vault_name)}"
-        f" &middot; rendered: {generated}"
-    )
+    meta_parts = [
+        f"{len(queue)} pending",
+        f"vault: {html.escape(vault_name)}",
+        f"rendered: {generated}",
+    ]
+    if acted_on > 0:
+        meta_parts.insert(1, f"{acted_on} already actioned (hidden)")
+    meta = " &middot; ".join(meta_parts)
 
     css = _CSS + _ACTIONS_CSS
     if not queue:

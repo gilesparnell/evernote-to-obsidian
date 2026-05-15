@@ -13,6 +13,7 @@ from the browser straight into the note in Obsidian.
 from pathlib import Path
 
 from scripts.classify.html_renderer import (
+    parse_review_queue_md,
     render_review_queue_html,
     render_sample_html,
 )
@@ -189,3 +190,107 @@ class TestRenderSampleHTML:
         )
         html = render_sample_html(samples=[note], vault=tmp_path)
         assert f"vault={tmp_path.name}" in html
+
+
+class TestParseReviewQueueMd:
+    """parse_review_queue_md reconstructs the queue from a saved
+    classification-review.md so the review server can re-render without
+    re-running the classifier. The `skip_acted_on` flag prunes rows whose
+    underlying file has been deleted or already classified — what the
+    triage UI needs after an operator has been making edits in parallel.
+    """
+
+    def _write_review_md(self, vault: Path, rows: list[str]) -> Path:
+        review = vault / "classification-review.md"
+        header = (
+            "# Classification Review Queue\n"
+            "Generated: 2026-05-15\n\n"
+            "| Note | Proposed type | Proposed org | Confidence | Reason |\n"
+            "|------|---------------|--------------|------------|--------|\n"
+        )
+        review.write_text(header + "\n".join(rows) + "\n", encoding="utf-8")
+        return review
+
+    def _write_note(
+        self, vault: Path, rel: str, frontmatter: str = "", body: str = "x",
+    ) -> Path:
+        path = vault / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if frontmatter:
+            path.write_text(
+                f"---\n{frontmatter}\n---\n\n{body}\n", encoding="utf-8",
+            )
+        else:
+            path.write_text(body + "\n", encoding="utf-8")
+        return path
+
+    def test_default_returns_every_row_even_if_file_is_missing(
+        self, tmp_path: Path,
+    ) -> None:
+        # Regression: with no flag, the parser preserves the old behaviour
+        # (return every row in the .md, no disc-state filtering).
+        review = self._write_review_md(tmp_path, [
+            "| [[ghost.md]] | note | Amazon | 0.40 | low |",
+        ])
+        result = parse_review_queue_md(review)
+        assert len(result) == 1
+        assert "ghost.md" in str(result[0]["path"])
+
+    def test_skip_acted_on_excludes_missing_files(self, tmp_path: Path) -> None:
+        # File listed in the queue has been deleted from disc — the
+        # filter prunes it from the rendered queue.
+        review = self._write_review_md(tmp_path, [
+            "| [[ghost.md]] | note | Amazon | 0.40 | low |",
+            "| [[real.md]] | note | Amazon | 0.50 | low |",
+        ])
+        self._write_note(tmp_path, "real.md")  # only this one exists
+        result = parse_review_queue_md(review, skip_acted_on=True)
+        assert len(result) == 1
+        assert result[0]["path"].name == "real.md"
+
+    def test_skip_acted_on_excludes_already_classified_files(
+        self, tmp_path: Path,
+    ) -> None:
+        # File listed in the queue has been reclassified manually — full
+        # R2 frontmatter now on disc, classify_confidence: 1.0. Filter it.
+        review = self._write_review_md(tmp_path, [
+            "| [[done.md]] | note | Amazon | 0.40 | low |",
+            "| [[pending.md]] | note | Amazon | 0.50 | low |",
+        ])
+        self._write_note(
+            tmp_path, "done.md",
+            frontmatter=(
+                "type: technical\norg: Amazon\ncontext: work\n"
+                'up: "[[Technical]]"\nclassify_confidence: 1.0'
+            ),
+        )
+        self._write_note(tmp_path, "pending.md", body="still ambiguous body")
+        result = parse_review_queue_md(review, skip_acted_on=True)
+        assert len(result) == 1
+        assert result[0]["path"].name == "pending.md"
+
+    def test_skip_acted_on_keeps_files_still_needing_review(
+        self, tmp_path: Path,
+    ) -> None:
+        # Happy path: file exists, no R2 frontmatter yet, so the row stays.
+        review = self._write_review_md(tmp_path, [
+            "| [[pending.md]] | note | Amazon | 0.50 | low |",
+        ])
+        self._write_note(tmp_path, "pending.md", body="still ambiguous")
+        result = parse_review_queue_md(review, skip_acted_on=True)
+        assert len(result) == 1
+        assert result[0]["path"].name == "pending.md"
+
+    def test_skip_acted_on_empty_file_returns_empty(self, tmp_path: Path) -> None:
+        # All queued rows have been acted on — the filtered result is empty.
+        review = self._write_review_md(tmp_path, [
+            "| [[done.md]] | note | Amazon | 0.40 | low |",
+        ])
+        self._write_note(
+            tmp_path, "done.md",
+            frontmatter=(
+                "type: note\norg: Amazon\ncontext: work\nup: \"[[Personal]]\""
+            ),
+        )
+        result = parse_review_queue_md(review, skip_acted_on=True)
+        assert result == []
