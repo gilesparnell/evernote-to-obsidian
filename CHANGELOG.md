@@ -13,6 +13,26 @@ Each entry is split into:
 
 ---
 
+## [0.3.0] — 2026-05-26
+
+### What's new
+- **Image-only, link-only, and embed-only notes no longer waste an LM call.** The classifier now recognises them on its own — Evernote Skitch screencaps, bare URLs, audio/PDF embeds. They land in a new `[[Clippings]]` MOC where you can review them in bulk via Obsidian's graph view rather than triaging them one at a time. Expected ~330 chunk-3 notes (of 566) auto-classified this way on the next AWS run.
+- **Tiny notes are now hard-deleted from the vault, not review-queued.** Bodies with under 30 chars of semantic content (phone numbers, one-line scribbles, leftover Evernote stubs) are removed on the spot. The vault becomes a curated brain instead of an archive of every scrap ever captured. Every deletion is recorded in `.classify_deleted_manifest.json` at the vault root with path, body preview, and timestamp — if a deletion ever surprises you, the manifest is the audit trail.
+- **Short 1-1 notes now classify automatically instead of being review-queued.** Previously the < 50 char body gate ran before the rules cascade, so a 30-char `1-1_ Dragon.md` body never got a chance to match the existing 1-1 title rule. Now it does.
+- **Dry-run is fully safe.** `--dry-run` counts what would be purged but doesn't touch the filesystem or write the manifest. CLI summary shows "purged=N (dry-run, no files removed)" so you can see what's coming before committing.
+- **Progress bar shows the new `purged:N` segment** alongside `auto` / `review` / `skip` / `missing`, plus `purged` now appears in `.classify_progress.json` totals so external watchers can track it without parsing the log.
+
+### Under the hood
+- `scripts/classify/rules_classifier.py`: new `_classify_by_body_shape(body, folder_hint)` short-circuits `classify()` with `type="clipping"` (conf 0.85) for bodies matching `_BODY_IMAGE_ONLY_RE`, `_BODY_URL_ONLY_RE`, `_BODY_AUDIO_EMBED_RE`, or `_BODY_PDF_EMBED_RE`. New public `should_purge_by_body_shape(body)` returns True when stripped body < 30 chars (including the zero-length case per operator decision 2026-05-26). Org inference mirrors the existing folder-hint fallback.
+- `scripts/classify/moc_map.py`: one entry added — `"clipping": "[[Clippings]]"`.
+- `scripts/classify/classify_vault.py`: per-note loop restructured. New order: (1) rules cascade, (2) purge gate iff rules < 0.80 confidence, (3) LM fallback iff body survived the purge gate, (4) auto-classify or review-queue based on best-of-two confidence. The previous `if len(body) < MIN_BODY_LENGTH` short-circuit was removed; the "too short to classify" review-queue label is preserved for 30-49 char bodies that escape both the clipping rules and the purge gate. New `_append_deletion_manifest(vault, run_id, md_path, body)` writes atomic tmp+rename JSON. New `_update_postfix` helper de-duplicates the progress-bar string between the purge branch and the classify branch.
+- `_write_heartbeat` signature gained a `purged` keyword; `.classify_progress.json` `totals` dict now includes `purged`.
+- Tests: 353 → 387 passing. New classes: `TestBodyShapeClippingRules` (13 tests), `TestShouldPurgeByBodyShape` (8 tests), `TestBodyShapeReason` (2 tests), `TestTinyBodyDeletion` (9 tests), `TestBodyShapeOrdering` (3 tests), plus one `TestUpMap` MOC test. Six pre-existing tests updated where their tiny convenience bodies (testing checkpoint writes, directory skipping, review-queue rendering — not tininess itself) would have triggered the new purge gate.
+- Plan: `docs/plans/2026-05-26-001-feat-body-shape-classifier-rules-plan.md`.
+- Known gap: markdown-wrapped tel links (`[041 581 7988](tel:041%20581%207988)`) strip to 32 chars and survive to the review queue rather than purging. Documented v2 enhancement: smarter stripping that collapses `[text](url)` to just `text`. For now, manually delete via the helper-server UI.
+
+---
+
 ## [0.2.0 → 0.2.3] — 2026-05-15
 
 ### What's new

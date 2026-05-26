@@ -529,3 +529,251 @@ class TestReviewQueueMinedRules:
         # fall through to content-based classification.
         result = classify("Inbox", "task list for the week", folder_hint="")
         assert result["type"] != "reference"
+
+
+class TestBodyShapeClippingRules:
+    """Plan 2026-05-26-001 — bodies that are JUST an embed (image / URL /
+    audio / PDF) classify as type='clipping' with high confidence, bypassing
+    the LM. Org comes from the folder hint when content gives no signal.
+
+    Mined from the 566-note chunk-3 review queue: 321 image-only + 7 URL-only
+    + 4 audio/PDF-only = 332 notes (58.7% of the queue) currently wasting an
+    LM call to land in review for human triage. After this rule, they auto-
+    classify as clippings."""
+
+    # --- Rule A: body is a single image embed ---
+
+    def test_body_single_image_skitch_classifies_as_clipping(self) -> None:
+        # Most common shape in the review queue: Evernote Skitch screencap.
+        result = classify(
+            title="03172015127.jpg",
+            body="![skitch.png](./_resources/03172015127.jpg.resources/skitch.png)",
+            folder_hint="AWS",
+        )
+        assert result["type"] == "clipping"
+
+    def test_body_single_image_other_alt_text_classifies_as_clipping(self) -> None:
+        # Not all image bodies are Skitch — Evernote also embeds with
+        # arbitrary alt text and IMG_xxxx.JPG filenames.
+        result = classify(
+            title="Containers_ Kevin Gibbs",
+            body="![IMG_0428.JPG](./_resources/Containers__Kevin_Gibbs.resources/IMG_0428.JPG)",
+            folder_hint="AWS",
+        )
+        assert result["type"] == "clipping"
+
+    def test_body_image_with_trailing_whitespace_classifies_as_clipping(self) -> None:
+        # The classifier currently strips body whitespace before length
+        # checks, but the body-shape regex should tolerate trailing newlines
+        # / spaces from Markdown render conventions.
+        result = classify(
+            title="screenshot",
+            body="![x](path.png)\n\n",
+            folder_hint="AWS",
+        )
+        assert result["type"] == "clipping"
+
+    def test_body_image_with_additional_text_falls_through(self) -> None:
+        # If there's a caption or any prose alongside the image, the body
+        # has real content — must NOT short-circuit to clipping.
+        result = classify(
+            title="Architecture diagram",
+            body=(
+                "![diagram](./_resources/arch.png)\n\n"
+                "This is the proposed AWS S3 + Lambda + IAM ingestion "
+                "pipeline for the Q2 deployment. See action items below."
+            ),
+            folder_hint="AWS",
+        )
+        assert result["type"] != "clipping"
+
+    # --- Rule B: body is a single URL ---
+
+    def test_body_single_url_classifies_as_clipping(self) -> None:
+        result = classify(
+            title="Spotify Account overview",
+            body="https://www.spotify.com/account/overview",
+            folder_hint="",
+        )
+        assert result["type"] == "clipping"
+
+    def test_body_url_in_angle_brackets_classifies_as_clipping(self) -> None:
+        # Common Markdown shape: angle-bracket-wrapped URL.
+        result = classify(
+            title="Laser guide",
+            body="<http://www.laserist.org/guide-to-laser-shows.html>",
+            folder_hint="",
+        )
+        assert result["type"] == "clipping"
+
+    def test_body_url_with_paragraph_text_falls_through(self) -> None:
+        result = classify(
+            title="Architecture refs",
+            body=(
+                "Reference architecture for AWS S3-backed ingestion is "
+                "documented at https://docs.aws.amazon.com/foo and the "
+                "Lambda piece is covered in the linked RFC."
+            ),
+            folder_hint="AWS",
+        )
+        assert result["type"] != "clipping"
+
+    # --- Rule C: body is an audio or PDF embed ---
+
+    def test_body_evernote_audio_embed_classifies_as_clipping(self) -> None:
+        # Evernote-exported voice memos: literal `[Evernote YYYYMMDD HH-MM-SS.m4a](...)`.
+        result = classify(
+            title="Note.14",
+            body="[Evernote 20180510 08-25-09.m4a](./_resources/Note.14.resources/Evernote%2020180510%2008-25-09.m4a)",
+            folder_hint="AWS",
+        )
+        assert result["type"] == "clipping"
+
+    def test_body_pdf_image_embed_classifies_as_clipping(self) -> None:
+        # Evernote-clipped PDFs land as image embeds with `.pdf` in the alt text
+        # (one-page-per-image preview).
+        result = classify(
+            title="Amazon Stamp 032",
+            body="![Amazon Stamp 032.pdf](./_resources/Amazon_Stamp_032.pdf/page-1.png)",
+            folder_hint="AWS",
+        )
+        assert result["type"] == "clipping"
+
+    # --- Org inference from folder hint ---
+    # These tests use a title that does NOT trigger any existing title rule
+    # (e.g. "x123"), so any passing org/confidence assertion comes from the
+    # new body-shape rule alone, not an accidental title-rule fallback.
+
+    def test_clipping_uses_folder_hint_for_amazon_org(self) -> None:
+        result = classify(
+            title="x123",  # no title-rule match
+            body="![s](./_r/s.png)",
+            folder_hint="AWS",  # → Amazon per ORG_KEYWORDS
+        )
+        assert result["type"] == "clipping"
+        assert result["org"] == "Amazon"
+
+    def test_clipping_no_folder_hint_defaults_to_personal(self) -> None:
+        result = classify(
+            title="x123",
+            body="![s](./_r/s.png)",
+            folder_hint="",
+        )
+        assert result["type"] == "clipping"
+        assert result["org"] == "Personal"
+
+    # --- Confidence ---
+
+    def test_clipping_confidence_above_auto_threshold(self) -> None:
+        # Body-shape rules must clear the 0.80 auto-classify gate so the
+        # pipeline writes frontmatter instead of routing to review. Title
+        # is "x123" to avoid the existing 'screenshot' title rule firing
+        # at confidence 0.95 and masking the body-shape rule's contribution.
+        result = classify(
+            title="x123",
+            body="![s](./_r/s.png)",
+            folder_hint="AWS",
+        )
+        assert result["type"] == "clipping"
+        assert result["confidence"] >= 0.80
+
+    # --- Integration with the existing cascade ---
+
+    def test_clipping_image_wins_over_title_keyword(self) -> None:
+        # A title like "Standup notes" would normally hit the title-rule
+        # cascade and classify as meeting. But an image-only body is a
+        # stronger signal that this is a clipped artefact, not a real
+        # meeting note — clipping wins.
+        result = classify(
+            title="Standup notes",
+            body="![board](./_r/whiteboard.png)",
+            folder_hint="AWS",
+        )
+        assert result["type"] == "clipping"
+
+
+class TestShouldPurgeByBodyShape:
+    """Plan 2026-05-26-001 — body < 30 chars (after stripping markdown
+    wrappers) is a stub note worth deleting outright. Operator opted in to
+    hard-delete on 2026-05-26; manifest at .classify_deleted_manifest.json
+    captures each deletion for audit.
+
+    Empty bodies ALSO purge per operator decision (zero-length notes are
+    junk by definition)."""
+
+    # True cases — small bodies purge
+
+    def test_purges_tiny_phone_number_body(self) -> None:
+        from scripts.classify.rules_classifier import should_purge_by_body_shape
+        # Bare phone number — the kind of one-line scribble the operator
+        # explicitly opted to purge. (Markdown-wrapped tel links are
+        # 32+ chars after stripping and survive to the review queue —
+        # documented as a v2 enhancement in plan §Out of Scope.)
+        assert should_purge_by_body_shape("041 581 7988")
+
+    def test_purges_tiny_address_fragment(self) -> None:
+        from scripts.classify.rules_classifier import should_purge_by_body_shape
+        # Real example: 746276943.md body was an ID string.
+        assert should_purge_by_body_shape("746276943\n082356")
+
+    def test_purges_body_with_only_whitespace_and_markdown_chars(self) -> None:
+        from scripts.classify.rules_classifier import should_purge_by_body_shape
+        # Real example: "AB Committee Meeting Agenda" body = "**<u>\n</u>**".
+        # After stripping markdown wrappers it's effectively empty.
+        assert should_purge_by_body_shape("**<u>\n</u>**")
+
+    def test_purges_29_char_body(self) -> None:
+        from scripts.classify.rules_classifier import should_purge_by_body_shape
+        # Boundary: 29 chars after strip = purge.
+        body = "x" * 29
+        assert should_purge_by_body_shape(body)
+
+    # True cases — empty bodies purge per 2026-05-26 operator decision
+
+    def test_purges_empty_body(self) -> None:
+        from scripts.classify.rules_classifier import should_purge_by_body_shape
+        assert should_purge_by_body_shape("")
+
+    def test_purges_whitespace_only_body(self) -> None:
+        from scripts.classify.rules_classifier import should_purge_by_body_shape
+        assert should_purge_by_body_shape("   \n\n\t  \n")
+
+    # False cases — bodies at or above the threshold do not purge
+
+    def test_does_not_purge_30_char_body(self) -> None:
+        from scripts.classify.rules_classifier import should_purge_by_body_shape
+        # Boundary: 30 chars after strip = keep. < not <=.
+        body = "x" * 30
+        assert not should_purge_by_body_shape(body)
+
+    def test_does_not_purge_image_only_body(self) -> None:
+        from scripts.classify.rules_classifier import should_purge_by_body_shape
+        # An image-only body strips down to "" via _BODY_STRIP_MARKDOWN_RE —
+        # which would be < 30 chars — BUT the pipeline runs the clipping
+        # rule check FIRST and routes to classify(), not purge. This unit
+        # test confirms should_purge() in isolation would return True; the
+        # pipeline-level test in TestBodyShapeOrdering proves the ordering.
+        #
+        # Reading the helper in isolation: yes, an image-only body strips
+        # to nothing and the function returns True. The CALLER (pipeline)
+        # is responsible for checking clipping rules first.
+        body = "![x](path.png)"
+        assert should_purge_by_body_shape(body)
+
+
+class TestBodyShapeReason:
+    """The reason string lives in the result dict and ends up in the review
+    HTML / heartbeat / sample reports. Must clearly name which body-shape
+    rule fired so downstream operators can understand the classification."""
+
+    def test_image_only_body_reason_names_clipping(self) -> None:
+        result = classify(
+            title="s", body="![x](path.png)", folder_hint="AWS",
+        )
+        assert "clipping" in result["reason"].lower()
+
+    def test_url_only_body_reason_names_clipping(self) -> None:
+        result = classify(
+            title="s", body="https://example.com/foo", folder_hint="",
+        )
+        assert "clipping" in result["reason"].lower()

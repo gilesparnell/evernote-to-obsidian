@@ -28,6 +28,11 @@ UP_MAP: dict[str, str] = {
     "application": "[[Job Hunt]]",
     "career": "[[Career]]",
     "pattern": "[[Patterns]]",
+    # Body-shape classifier output (plan 2026-05-26-001) — bodies that are
+    # JUST an image / URL / audio / PDF embed land here. Kept separate from
+    # [[Reference]] so operator-authored references stay distinguishable
+    # from Evernote import artefacts.
+    "clipping": "[[Clippings]]",
 }
 
 

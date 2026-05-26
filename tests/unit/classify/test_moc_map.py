@@ -25,6 +25,12 @@ class TestUpMap:
     def test_application_maps_to_job_hunt(self) -> None:
         assert UP_MAP["application"] == "[[Job Hunt]]"
 
+    def test_clipping_maps_to_clippings_moc(self) -> None:
+        # Plan 2026-05-26-001 — body-shape rules emit type='clipping' for
+        # single-image / single-URL / embed-only Evernote import artefacts.
+        # New MOC keeps them separate from operator-authored references.
+        assert UP_MAP["clipping"] == "[[Clippings]]"
+
 
 class TestUpForType:
     def test_known_type_returns_mapped_moc(self) -> None:

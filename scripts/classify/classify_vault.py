@@ -52,6 +52,8 @@ _REVIEW_FILENAME = "classification-review.md"
 _REVIEW_HTML_FILENAME = "classification-review.html"
 _CHECKPOINT_FILENAME = ".classify_checkpoint.json"
 _HEARTBEAT_FILENAME = ".classify_progress.json"
+_MANIFEST_FILENAME = ".classify_deleted_manifest.json"
+_DELETED_BODY_PREVIEW_CHARS = 50
 _AEST = timezone(timedelta(hours=10))  # Australia/Sydney standard time
 
 # Top-level vault directories that the classifier must NEVER touch — protects
@@ -218,6 +220,7 @@ def _write_heartbeat(
     lm_latencies: list[float],
     complete: bool,
     skipped_missing: int = 0,
+    purged: int = 0,
 ) -> None:
     """Atomically write a heartbeat snapshot to vault/.classify_progress.json.
 
@@ -227,7 +230,7 @@ def _write_heartbeat(
     """
     scanned = (
         auto_classified + needs_review
-        + skipped_already_classified + skipped_missing
+        + skipped_already_classified + skipped_missing + purged
     )
     lm_avg = (
         round(sum(lm_latencies) / len(lm_latencies), 1)
@@ -245,6 +248,7 @@ def _write_heartbeat(
             "needs_review": needs_review,
             "skipped_already_classified": skipped_already_classified,
             "skipped_missing": skipped_missing,
+            "purged": purged,
             "lm_calls": len(lm_latencies),
             "lm_call_avg_seconds": lm_avg,
         },
@@ -257,6 +261,42 @@ def _write_heartbeat(
     except OSError:
         # Heartbeat is non-load-bearing — don't crash the run.
         pass
+
+
+def _update_postfix(
+    pbar: tqdm,
+    auto_classified: int,
+    review_len: int,
+    skipped_already_classified: int,
+    skipped_missing: int,
+    purged: int,
+    rules_auto_classified: int,
+    lm_latencies: list[float],
+    corpus_classified_at_start: int,
+    corpus_size: int,
+    unclassified_count: int,
+    loop_start_seconds: float,
+) -> None:
+    """Render the tqdm progress-bar postfix string. Extracted so the purge
+    branch and the classify branch share one source of truth for the
+    counters segment."""
+    lm_avg_str = (
+        f"lm-avg:{sum(lm_latencies) / len(lm_latencies):.1f}s"
+        if lm_latencies else "lm-avg:-"
+    )
+    attempts = auto_classified + review_len + purged
+    corpus_remaining = max(0, unclassified_count - attempts)
+    elapsed = time.monotonic() - loop_start_seconds
+    pbar.set_postfix_str(
+        f"auto:{auto_classified} | review:{review_len} | "
+        f"purged:{purged} | "
+        f"skip:{skipped_already_classified} | missing:{skipped_missing} | "
+        f"{_auto_classify_rate(auto_classified, review_len)} | "
+        f"{_rules_hit_rate(rules_auto_classified, auto_classified)} | "
+        f"{lm_avg_str} | "
+        f"{_overall_postfix(corpus_classified_at_start + auto_classified, corpus_size)} | "
+        f"{_corpus_eta(elapsed, attempts, corpus_remaining)}"
+    )
 
 
 def _classify_note_content(
@@ -279,6 +319,53 @@ def _classify_note_content(
     return result, lm_latency
 
 
+def _append_deletion_manifest(
+    vault: Path, run_id: str, md_path: Path, body: str
+) -> None:
+    """Append a deletion record to .classify_deleted_manifest.json.
+
+    Atomic tmp+rename write per the project's iCloud-safe pattern. The
+    manifest is read first, the new entry is appended, the whole thing is
+    rewritten — so deletions accumulate across runs rather than being
+    overwritten. The file is created with an empty ``deleted`` list on
+    first write.
+
+    Path is stored relative to the vault root so the manifest stays
+    portable if the vault is moved or shared.
+    """
+    target = vault / _MANIFEST_FILENAME
+    if target.exists():
+        try:
+            data = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            # Corrupt manifest — start fresh; better than crashing the run.
+            data = {"deleted": []}
+    else:
+        data = {"deleted": []}
+
+    try:
+        rel_path = str(md_path.relative_to(vault))
+    except ValueError:
+        rel_path = str(md_path)
+
+    body_preview = body[:_DELETED_BODY_PREVIEW_CHARS].replace("\n", " ").strip()
+    stripped_chars = len(
+        rules_classifier._BODY_STRIP_MARKDOWN_RE.sub("", body).strip()
+    )
+
+    data["deleted"].append({
+        "path": rel_path,
+        "stripped_body_chars": stripped_chars,
+        "body_preview": body_preview,
+        "deleted_at_aest": _now_aest_iso(),
+        "run_id": run_id,
+    })
+
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    tmp.replace(target)
+
+
 def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
     vault: Path,
     folder: str | None = None,
@@ -293,7 +380,9 @@ def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
     auto_classified = 0
     skipped_already_classified = 0
     skipped_missing = 0
+    purged = 0
     started_at = _now_aest_iso()
+    run_id = started_at
 
     checkpoint_path = vault / _CHECKPOINT_FILENAME
 
@@ -319,7 +408,8 @@ def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
     )
 
     for md_path in file_list:
-        if limit is not None and (auto_classified + len(review_queue)) >= limit:
+        attempts_so_far = auto_classified + len(review_queue) + purged
+        if limit is not None and attempts_so_far >= limit:
             break
 
         try:
@@ -341,7 +431,75 @@ def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
         folder_hint = md_path.parent.name
         processed_paths.append(str(md_path))
 
-        if len(body) < MIN_BODY_LENGTH:
+        # Step 1 — rules cascade. Body-shape rules inside rules_classifier
+        # catch clipping-shape bodies (image/url/embed) with high
+        # confidence and short-circuit the LM. Title rules + keyword
+        # scoring handle the rest.
+        rules_result = rules_classifier.classify(
+            title, body, folder_hint=folder_hint,
+        )
+        lm_latency: float | None = None
+
+        if rules_result["confidence"] >= CONFIDENCE_THRESHOLD:
+            chosen = rules_result
+            rules_won = True
+        else:
+            # Step 2 — purge gate. Tiny bodies that the rules cascade
+            # couldn't classify confidently are import junk. Hard-delete +
+            # manifest, then skip the LM entirely. The ordering matters:
+            # by checking rules FIRST, image-only short bodies survive
+            # because the clipping rule returns conf 0.85 → auto-classify
+            # instead of hitting this purge gate.
+            if rules_classifier.should_purge_by_body_shape(body):
+                if not dry_run:
+                    _append_deletion_manifest(vault, run_id, md_path, body)
+                    md_path.unlink()
+                    time.sleep(ICLOUD_SLEEP_SECONDS)
+                purged += 1
+                pbar.update(1)
+                _update_postfix(
+                    pbar, auto_classified, len(review_queue),
+                    skipped_already_classified, skipped_missing, purged,
+                    rules_auto_classified, lm_latencies,
+                    corpus_classified_at_start, corpus_size,
+                    unclassified_count, loop_start_seconds,
+                )
+                continue
+
+            # Step 3 — LM fallback. Body has real content but the rules
+            # cascade couldn't reach the auto-classify threshold.
+            t0 = time.perf_counter()
+            lm_result = lm_classifier.classify(title, body, folder_hint)
+            lm_latency = time.perf_counter() - t0
+            lm_latencies.append(lm_latency)
+            chosen = (
+                lm_result
+                if lm_result["confidence"] > rules_result["confidence"]
+                else rules_result
+            )
+            rules_won = False
+
+        if chosen["confidence"] >= CONFIDENCE_THRESHOLD:
+            new_fields = {
+                "type": chosen["type"],
+                "org": chosen["org"],
+                "context": chosen["context"],
+                "people": chosen["people"],
+                "tags": chosen["tags"],
+                "up": up_for_type(chosen["type"]),
+                "classify_confidence": round(chosen["confidence"], 2),
+            }
+            if not dry_run:
+                _fm.write_frontmatter(md_path, new_fields)
+                time.sleep(ICLOUD_SLEEP_SECONDS)
+            auto_classified += 1
+            if rules_won:
+                rules_auto_classified += 1
+        elif len(body) < MIN_BODY_LENGTH:
+            # Short body that escaped both the clipping rules and the
+            # purge gate (30 <= stripped chars < 50). Preserve the
+            # historical "too short to classify" review-queue label so
+            # operators can still find these via the existing reason.
             review_queue.append({
                 "path": md_path,
                 "proposed_type": "?",
@@ -350,56 +508,24 @@ def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
                 "reason": "too short to classify",
             })
         else:
-            result, lm_latency = _classify_note_content(title, body, folder_hint)
-            if lm_latency is not None:
-                lm_latencies.append(lm_latency)
-            if result["confidence"] >= CONFIDENCE_THRESHOLD:
-                new_fields = {
-                    "type": result["type"],
-                    "org": result["org"],
-                    "context": result["context"],
-                    "people": result["people"],
-                    "tags": result["tags"],
-                    "up": up_for_type(result["type"]),
-                    "classify_confidence": round(result["confidence"], 2),
-                }
-                if not dry_run:
-                    _fm.write_frontmatter(md_path, new_fields)
-                    time.sleep(ICLOUD_SLEEP_SECONDS)
-                auto_classified += 1
-                # Rules-only catch: the cascade returned a confident answer
-                # before reaching the LM (lm_latency=None signals this).
-                if lm_latency is None:
-                    rules_auto_classified += 1
-            else:
-                review_queue.append({
-                    "path": md_path,
-                    "proposed_type": result["type"],
-                    "proposed_org": result["org"],
-                    "confidence": result["confidence"],
-                    "reason": result.get(
-                        "reason", "low confidence from both classifiers"
-                    ),
-                })
+            review_queue.append({
+                "path": md_path,
+                "proposed_type": chosen["type"],
+                "proposed_org": chosen["org"],
+                "confidence": chosen["confidence"],
+                "reason": chosen.get(
+                    "reason", "low confidence from both classifiers"
+                ),
+            })
 
         pbar.update(1)  # advance on classification attempt only
 
-        lm_avg_str = (
-            f"lm-avg:{sum(lm_latencies) / len(lm_latencies):.1f}s"
-            if lm_latencies else "lm-avg:-"
-        )
-        attempts = auto_classified + len(review_queue)
-        corpus_remaining = max(0, unclassified_count - attempts)
-        elapsed = time.monotonic() - loop_start_seconds
-
-        pbar.set_postfix_str(
-            f"auto:{auto_classified} | review:{len(review_queue)} | "
-            f"skip:{skipped_already_classified} | missing:{skipped_missing} | "
-            f"{_auto_classify_rate(auto_classified, len(review_queue))} | "
-            f"{_rules_hit_rate(rules_auto_classified, auto_classified)} | "
-            f"{lm_avg_str} | "
-            f"{_overall_postfix(corpus_classified_at_start + auto_classified, corpus_size)} | "
-            f"{_corpus_eta(elapsed, attempts, corpus_remaining)}"
+        _update_postfix(
+            pbar, auto_classified, len(review_queue),
+            skipped_already_classified, skipped_missing, purged,
+            rules_auto_classified, lm_latencies,
+            corpus_classified_at_start, corpus_size,
+            unclassified_count, loop_start_seconds,
         )
 
         if not dry_run and len(processed_paths) % checkpoint_interval == 0:
@@ -411,6 +537,7 @@ def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
                 auto_classified, len(review_queue), skipped_already_classified,
                 lm_latencies, complete=False,
                 skipped_missing=skipped_missing,
+                purged=purged,
             )
 
     pbar.close()
@@ -421,6 +548,7 @@ def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
             auto_classified, len(review_queue), skipped_already_classified,
             lm_latencies, complete=True,
             skipped_missing=skipped_missing,
+            purged=purged,
         )
 
     generated = datetime.now().strftime("%Y-%m-%d")
@@ -443,6 +571,7 @@ def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
         "auto_classified": auto_classified,
         "skipped_already_classified": skipped_already_classified,
         "skipped_missing": skipped_missing,
+        "purged": purged,
         "needs_review": len(review_queue),
         "review_queue_md": review_md,
     }
@@ -516,9 +645,15 @@ def main() -> None:
         limit=args.limit,
         html_out=args.html,
     )
+    purge_label = (
+        f"purged={summary['purged']} (dry-run, no files removed)"
+        if args.dry_run
+        else f"purged={summary['purged']}"
+    )
     print(
         f"\nauto_classified={summary['auto_classified']}, "
         f"needs_review={summary['needs_review']}, "
+        f"{purge_label}, "
         f"skipped_already_classified={summary['skipped_already_classified']}, "
         f"skipped_missing={summary['skipped_missing']}"
     )

@@ -216,6 +216,108 @@ _TITLE_TYPE_RULES: list[tuple[re.Pattern[str], str]] = [
 # the 0.80 auto-classify threshold when combined with a confident org.
 _TITLE_RULE_CONFIDENCE = 0.95
 
+# --- Body-shape rules (plan 2026-05-26-001) ---
+#
+# Three rules auto-classify bodies that are JUST an embed (image / URL /
+# audio / PDF) as type=clipping. One rule (`should_purge_by_body_shape`)
+# signals to the pipeline that a body is too short to be worth keeping —
+# the pipeline then hard-deletes the file. Mined from 566-note chunk-3
+# review queue analysis: 332 single-embed bodies + 75 tiny bodies = 407
+# of 566 review-queue entries pre-empted before the LM was ever called.
+
+# Body that is JUST an image embed (Skitch screencap, IMG_*.jpg, etc.).
+_BODY_IMAGE_ONLY_RE = re.compile(r"^\s*!\[[^\]]*\]\([^)]+\)\s*$")
+
+# Body that is JUST a URL (bare or angle-bracketed Markdown autolink).
+_BODY_URL_ONLY_RE = re.compile(r"^\s*<?https?://\S+?>?\s*$")
+
+# Body that is JUST an Evernote-exported audio embed (.m4a / .mp3 / .wav).
+_BODY_AUDIO_EMBED_RE = re.compile(
+    r"^\s*\[Evernote\s+\d{8,}[^\]]*\.(?:m4a|mp3|wav)\]\([^)]+\)\s*$",
+    re.IGNORECASE,
+)
+
+# Body that is JUST a PDF embed (Evernote one-page PDF clippings).
+_BODY_PDF_EMBED_RE = re.compile(
+    r"^\s*!\[[^\]]*\.pdf[^\]]*\]\([^)]+\)\s*$",
+    re.IGNORECASE,
+)
+
+# Strip set for the tiny-body check: removes structural Markdown chars
+# so the remaining length reflects semantic content. Keeps URL/path
+# contents inside `(...)` — those count, even if they're not user prose,
+# because operator decision (2026-05-26) is that 30 stripped chars is
+# the threshold to KEEP not DELETE.
+_BODY_STRIP_MARKDOWN_RE = re.compile(r"[*_#>\[\]()\\\n\t]")
+
+_TINY_BODY_MAX_CHARS = 30
+_BODY_SHAPE_CONFIDENCE = 0.85
+
+
+def should_purge_by_body_shape(body: str) -> bool:
+    """True iff the body has < 30 chars of semantic content after stripping
+    Markdown wrappers. Includes the zero-length case (empty / whitespace-
+    only files) per operator decision 2026-05-26 — those notes are junk by
+    definition.
+
+    The caller (classify_vault.py) is responsible for hard-deleting the
+    file and appending to the deletion manifest. This function only
+    *detects* tininess; it does not act on it.
+
+    NOTE: an image-only body strips to almost nothing (`!xpath.png` and
+    similar), so this function will return True for image-only bodies.
+    The pipeline must check the clipping rules FIRST and only fall back
+    to purge if no clipping rule matched. See TestBodyShapeOrdering."""
+    stripped = _BODY_STRIP_MARKDOWN_RE.sub("", body).strip()
+    return len(stripped) < _TINY_BODY_MAX_CHARS
+
+
+def _classify_by_body_shape(
+    body: str, folder_hint: str
+) -> dict[str, Any] | None:
+    """Return a full classify() result dict for clipping-shape bodies, or
+    None when no shape matches. Org comes from the folder hint via the
+    same logic as the main classify() function.
+
+    Order matters — image is checked before audio/PDF embeds because the
+    embed regexes are stricter and would fail earlier; check the most
+    common shape first to short-circuit fast."""
+    if _BODY_IMAGE_ONLY_RE.match(body):
+        # PDF check happens via _BODY_IMAGE_ONLY_RE too (PDFs land as
+        # image embeds with .pdf in the alt text). The reason string
+        # distinguishes them for the review HTML / sample reports.
+        if _BODY_PDF_EMBED_RE.match(body):
+            reason = "body-shape: PDF embed (clipping)"
+        else:
+            reason = "body-shape: single image (clipping)"
+    elif _BODY_URL_ONLY_RE.match(body):
+        reason = "body-shape: single URL (clipping)"
+    elif _BODY_AUDIO_EMBED_RE.match(body):
+        reason = "body-shape: Evernote audio embed (clipping)"
+    else:
+        return None
+
+    # Org inference mirrors the folder-hint fallback path in classify().
+    folder_lower = folder_hint.lower()
+    hint_scores = _score_keywords(folder_lower, ORG_KEYWORDS)
+    hint_org = _argmax_first(hint_scores)
+    if hint_org is not None:
+        org = hint_org
+    else:
+        org = "Personal"
+
+    context = "work" if org in _WORK_ORGS else "personal"
+
+    return {
+        "type": "clipping",
+        "org": org,
+        "context": context,
+        "people": [],
+        "tags": [],
+        "confidence": _BODY_SHAPE_CONFIDENCE,
+        "reason": reason,
+    }
+
 # Minimum keyword-score for the rules cascade to auto-classify on
 # keywords alone. Without this, a note hitting ONE generic keyword
 # (e.g. 'credentials' from career, 'demonstrate' from interview) gets
@@ -326,6 +428,15 @@ def classify(title: str, body: str, folder_hint: str = "") -> dict[str, Any]:
     combined = f"{title}\n{body}"
     combined_lower = combined.lower()
     folder_lower = folder_hint.lower()
+
+    # Body-shape rules (plan 2026-05-26-001). Bodies that are JUST an
+    # embed (image / URL / audio / PDF) classify as clipping with high
+    # confidence and skip the keyword cascade entirely. These signals are
+    # stronger than any title keyword — a "Standup notes" title with an
+    # image-only body is a clipping, not a meeting.
+    body_shape_result = _classify_by_body_shape(body, folder_hint)
+    if body_shape_result is not None:
+        return body_shape_result
 
     # Org detection — content first, folder hint when content is silent.
     org_scores = _score_keywords(combined_lower, ORG_KEYWORDS)

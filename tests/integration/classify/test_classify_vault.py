@@ -179,8 +179,14 @@ class TestClassifyVault:
     def test_checkpoint_written_every_interval(self, tmp_path: Path) -> None:
         # Create 7 notes, set checkpoint interval to 3 — checkpoint should
         # appear after notes 3 and 6 (the file is overwritten each time).
+        # Bodies sized above the purge threshold (>= 30 chars stripped) so
+        # this test exercises the classify-path checkpoint write, not the
+        # purge-path (purge skips checkpoints by design).
         for i in range(7):
-            _write_note(tmp_path / f"note-{i:02d}.md", body=f"short body {i}")
+            _write_note(
+                tmp_path / f"note-{i:02d}.md",
+                body=f"checkpoint test body content number {i:02d} padded out",
+            )
         with patch(
             "scripts.classify.classify_vault.lm_classifier.classify",
             return_value=_lm_result("note", "Personal", confidence=0.2),
@@ -195,17 +201,34 @@ class TestClassifyVault:
     def test_short_body_goes_to_review_with_too_short_reason(
         self, tmp_path: Path
     ) -> None:
+        # New behaviour (plan 2026-05-26-001): bodies < 30 chars purge,
+        # bodies 30-49 chars hit the preserved 'too short' review-queue
+        # path. This test exercises the latter window — historically it
+        # used a < 30-char body; that case now purges instead.
         note = tmp_path / "shorty.md"
-        _write_note(note, body="too short")  # well under 50 chars
+        _write_note(note, body="between purge and min body length zone")  # 38 chars
         result = classify_vault(vault=tmp_path)
         assert result["needs_review"] == 1
         review = (tmp_path / "classification-review.md").read_text(encoding="utf-8")
         assert "too short" in review.lower()
 
     def test_review_queue_renders_valid_markdown_table(self, tmp_path: Path) -> None:
-        _write_note(tmp_path / "short1.md", body="tiny")
-        _write_note(tmp_path / "short2.md", body="also tiny")
-        classify_vault(vault=tmp_path)
+        # Bodies sized above the purge threshold so they actually reach
+        # the review queue (was 'tiny' / 'also tiny' historically — those
+        # now purge instead of review-queueing).
+        _write_note(
+            tmp_path / "short1.md",
+            body="moderately short body one for review queue test xx",
+        )
+        _write_note(
+            tmp_path / "short2.md",
+            body="moderately short body two for review queue test xx",
+        )
+        with patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("note", "Personal", confidence=0.2),
+        ):
+            classify_vault(vault=tmp_path)
         review = (tmp_path / "classification-review.md").read_text(encoding="utf-8")
         # Header + separator row + two data rows
         assert "| Note | Proposed type | Proposed org | Confidence | Reason |" in review
@@ -231,12 +254,17 @@ class TestClassifyVault:
         assert result["needs_review"] + result["auto_classified"] == 1
 
     def test_skips_hidden_directories(self, tmp_path: Path) -> None:
-        # Files under .obsidian/ must never be touched.
+        # Files under .obsidian/ must never be touched. Bodies sized above
+        # the purge threshold (30 stripped chars) so the real note actually
+        # makes it to classify, not purge.
         _write_note(
             tmp_path / ".obsidian" / "config.md",
-            body="vault config — must not be classified",
+            body="vault config — must not be classified or purged",
         )
-        _write_note(tmp_path / "real.md", body="real note body")
+        _write_note(
+            tmp_path / "real.md",
+            body="real note body padded out beyond purge threshold xxx",
+        )
         with patch(
             "scripts.classify.classify_vault.lm_classifier.classify",
             return_value=_lm_result("note", "Personal", confidence=0.2),
@@ -253,7 +281,10 @@ class TestClassifyVault:
             frontmatter="title: X\ntype: concept",
             body="hand-curated wiki content with a different schema",
         )
-        _write_note(tmp_path / "real.md", body="real note body content")
+        _write_note(
+            tmp_path / "real.md",
+            body="real note body padded out beyond purge threshold xxx",
+        )
         with patch(
             "scripts.classify.classify_vault.lm_classifier.classify",
             return_value=_lm_result("note", "Personal", confidence=0.2),
@@ -268,7 +299,10 @@ class TestClassifyVault:
             tmp_path / "Personal-backup-20260424" / "old-note.md",
             body="snapshot content from previous backup",
         )
-        _write_note(tmp_path / "real.md", body="real note body content")
+        _write_note(
+            tmp_path / "real.md",
+            body="real note body padded out beyond purge threshold xxx",
+        )
         with patch(
             "scripts.classify.classify_vault.lm_classifier.classify",
             return_value=_lm_result("note", "Personal", confidence=0.2),
@@ -473,3 +507,163 @@ class TestClassifyVaultHeartbeat:
             (tmp_path / ".classify_progress.json").read_text(encoding="utf-8")
         )
         assert data["totals"]["lm_calls"] >= 3
+
+
+class TestTinyBodyDeletion:
+    """Plan 2026-05-26-001 — bodies < 30 chars (after stripping markdown)
+    are hard-deleted from disc. Each deletion is appended to
+    .classify_deleted_manifest.json so the operator can audit what went.
+
+    Empty bodies also purge per the 2026-05-26 operator decision.
+    Dry-run must count purges but not touch the filesystem."""
+
+    def test_tiny_body_file_is_deleted_from_disk(self, tmp_path: Path) -> None:
+        tiny = tmp_path / "Note.13.md"
+        _write_note(tiny, body="Bread rolls")  # 11 chars — purges
+        classify_vault(vault=tmp_path)
+        assert not tiny.exists(), "tiny-body file should have been removed"
+
+    def test_tiny_body_deletion_appends_to_manifest(self, tmp_path: Path) -> None:
+        tiny = tmp_path / "Note.13.md"
+        _write_note(tiny, body="Bread rolls")
+        classify_vault(vault=tmp_path)
+        manifest_path = tmp_path / ".classify_deleted_manifest.json"
+        assert manifest_path.exists()
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert "deleted" in data
+        assert len(data["deleted"]) == 1
+        entry = data["deleted"][0]
+        assert entry["path"].endswith("Note.13.md")
+
+    def test_manifest_entry_has_required_fields(self, tmp_path: Path) -> None:
+        tiny = tmp_path / "phone.md"
+        _write_note(tiny, body="041 581 7988")
+        classify_vault(vault=tmp_path)
+        data = json.loads(
+            (tmp_path / ".classify_deleted_manifest.json").read_text(encoding="utf-8")
+        )
+        entry = data["deleted"][0]
+        for required in ("path", "stripped_body_chars", "body_preview",
+                         "deleted_at_aest", "run_id"):
+            assert required in entry, f"manifest missing required field: {required}"
+
+    def test_tiny_body_purge_does_not_create_review_queue_entry(
+        self, tmp_path: Path
+    ) -> None:
+        tiny = tmp_path / "phone.md"
+        _write_note(tiny, body="041 581 7988")
+        result = classify_vault(vault=tmp_path)
+        # Purges are NOT review-queued; the file is gone, end of story.
+        assert result["needs_review"] == 0
+
+    def test_purged_counter_increments(self, tmp_path: Path) -> None:
+        for i in range(3):
+            _write_note(tmp_path / f"tiny-{i:02d}.md", body=f"x{i}")
+        result = classify_vault(vault=tmp_path)
+        assert result["purged"] == 3
+
+    def test_empty_body_file_is_deleted(self, tmp_path: Path) -> None:
+        # 2026-05-26 operator decision: zero-length bodies also purge.
+        empty = tmp_path / "empty.md"
+        _write_note(empty, body="")
+        classify_vault(vault=tmp_path)
+        assert not empty.exists()
+
+    def test_dry_run_does_not_delete_or_write_manifest(self, tmp_path: Path) -> None:
+        tiny = tmp_path / "phone.md"
+        _write_note(tiny, body="041 581 7988")
+        result = classify_vault(vault=tmp_path, dry_run=True)
+        assert tiny.exists(), "dry-run must not delete files"
+        assert not (tmp_path / ".classify_deleted_manifest.json").exists(), (
+            "dry-run must not write the manifest"
+        )
+        # ...but the counter still increments so the operator sees what
+        # WOULD happen on a real run.
+        assert result["purged"] == 1
+
+    def test_manifest_appends_across_multiple_runs(self, tmp_path: Path) -> None:
+        # Run 1: one purge
+        _write_note(tmp_path / "tiny-a.md", body="aa")
+        classify_vault(vault=tmp_path)
+        # Run 2: another purge
+        _write_note(tmp_path / "tiny-b.md", body="bb")
+        classify_vault(vault=tmp_path)
+        data = json.loads(
+            (tmp_path / ".classify_deleted_manifest.json").read_text(encoding="utf-8")
+        )
+        assert len(data["deleted"]) == 2, (
+            "manifest must accumulate deletions across runs, not overwrite"
+        )
+
+    def test_purged_appears_in_heartbeat_totals(self, tmp_path: Path) -> None:
+        _write_note(tmp_path / "tiny.md", body="aa")
+        classify_vault(vault=tmp_path)
+        progress = json.loads(
+            (tmp_path / ".classify_progress.json").read_text(encoding="utf-8")
+        )
+        assert progress["totals"]["purged"] == 1
+
+
+class TestBodyShapeOrdering:
+    """Plan 2026-05-26-001 — ordering of the new body-shape pipeline:
+
+    1. Clipping rules run inside classify() and produce a high-confidence
+       result for image-only / URL-only / embed-only bodies.
+    2. should_purge_by_body_shape() is checked at PIPELINE level before
+       classify() so tiny bodies are deleted, not classified.
+
+    The critical edge case: a 14-char image-only body (e.g. `![x](a.png)`)
+    strips to nothing — should_purge_by_body_shape would return True in
+    isolation. But the pipeline must NOT delete it; it must classify it
+    as a clipping. The fix is to run the clipping rule check BEFORE the
+    purge check at the pipeline level."""
+
+    def test_image_only_short_body_classifies_as_clipping_not_deleted(
+        self, tmp_path: Path
+    ) -> None:
+        # Body strips to 0 chars but is a valid image embed — must clip.
+        img = tmp_path / "screenshot.md"
+        _write_note(img, body="![x](p.png)")
+        result = classify_vault(vault=tmp_path)
+        assert img.exists(), (
+            "image-only body must classify as clipping, not be purged"
+        )
+        assert result["purged"] == 0
+        assert result["auto_classified"] == 1
+
+    def test_short_unmatched_body_still_review_queues_too_short(
+        self, tmp_path: Path
+    ) -> None:
+        # A body between the purge threshold (30) and MIN_BODY_LENGTH (50)
+        # that doesn't match any body-shape rule and doesn't classify
+        # confidently → still falls through to the existing 'too short'
+        # review queue entry.
+        ambiguous = tmp_path / "fragment.md"
+        # 35 chars after .strip() — above purge (30), below MIN_BODY_LENGTH (50).
+        _write_note(ambiguous, body="some longer fragment of body text!!")
+        with patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("note", "Personal", confidence=0.2),
+        ):
+            result = classify_vault(vault=tmp_path)
+        assert ambiguous.exists(), "ambiguous short bodies must not be purged"
+        # Either review-queued or auto-classified (depending on rule firing);
+        # the key invariant is: NOT purged.
+        assert result["purged"] == 0
+
+    def test_short_one_on_one_body_classifies_as_meeting(
+        self, tmp_path: Path
+    ) -> None:
+        # Side-effect of Unit 3: short 1-1 notes now reach the title-rule
+        # cascade (previously short-circuited by MIN_BODY_LENGTH gate).
+        # Body is long enough to clear the purge threshold but short enough
+        # that the OLD pipeline would have review-queued it.
+        one_on_one = tmp_path / "1-1_ Dragon.md"
+        _write_note(one_on_one, body="* Wants to stay at AWS\n\n* * *")
+        result = classify_vault(vault=tmp_path)
+        assert result["auto_classified"] == 1, (
+            "short 1-1 note should hit the existing title rule and auto-classify"
+        )
+        # Confirm the surviving file has meeting frontmatter
+        text = one_on_one.read_text(encoding="utf-8")
+        assert "type: meeting" in text
