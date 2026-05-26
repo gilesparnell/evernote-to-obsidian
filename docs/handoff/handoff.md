@@ -4,6 +4,84 @@ Newest entry at top. Each entry is a resumable snapshot for a fresh Claude or Co
 
 ---
 
+## 2026-05-26 NIGHT AEST — ▶ RESUME HERE: body-shape rules shipped, chunk-3 review queue cut 566 → 97 (-83%)
+
+**Runner for next turn:** human (operator). Code stable, v0.3.0 shipped (commit `db11a00`), 387 tests green. Next moves are about the post-chunk operator checklist and deciding whether to add an Anthropic API adapter for the remaining ~7,800 notes.
+
+### State on disc
+
+- **Re-run on AWS folder** (2026-05-26 19:37 → 21:29 AEST, 1h52m): scanned 2834, processed 700 new, auto:541, review:97, **purged:62** (new behaviour), skip:2134, missing:0. lm-calls 327, lm-avg 20.5s. Final stats: ac:85%, rules:57%.
+- **AWS corpus progress**: 2,675 / 6,224 classified (43.0%) — up from 34.3% at chunk-3 end. Remaining: 3,549 unclassified.
+- **Review queue dropped 566 → 97** (-82.9%) — exactly what the body-shape analysis predicted. New review queue is a healthier mix of `note` (23), `technical` (20), `?` (17), `personal` (15), `meeting` (13), `journal` (9) — genuinely ambiguous cases needing human judgement, not pattern-detection failures.
+- **292 notes now carry `type: clipping`** in AWS folder, all routed to `[[Clippings]]` MOC. Sample-checked 10 at random: all genuinely image-only bodies (Skitch screencaps + IMG_*.JPG + Pasted Image), 0 false positives.
+- **62 files hard-deleted** this run. Manifest at `~/Documents/ObsidianVault/Personal/.classify_deleted_manifest.json` — 62 entries, all from this run, with path + stripped char count + body preview + run_id.
+- **Backups**: pre-classification tarball `~/Backups/ObsidianVault-pre-classification-2026-05-14.tar.gz` (12 days old) is the recovery source for any purge the operator regrets.
+
+### Borderline manifest entries worth a glance
+
+Five purged files where the filename suggests work-relevance even though the body was < 30 chars:
+
+| Path | Body |
+|---|---|
+| `Evernote/notes/AWS/Best Practices Discussion with Fran.md` | "Tier one- customer impacting" (28 chars) |
+| `Evernote/notes/AWS/Contour Sprint 15 Planning.md` | "Runbooks" (8 chars) |
+| `Evernote/notes/AWS/Deep Dive_ Review.md` | "1. Randomising" (14 chars) |
+| `Evernote/notes/AWS/Peer Feedback - 2015.md` | "- [ ] Anthony Surez" (17 chars) |
+| `Evernote/notes/AWS/Planning for Region Sync.md` | "Ordering of service builds" (26 chars) |
+
+Recoverable from the backup tarball if any of them turn out to have been needed.
+
+### What landed this session
+
+- **Plan**: `docs/plans/2026-05-26-001-feat-body-shape-classifier-rules-plan.md`
+- **Code (commit db11a00)**: 4 body-shape regex rules in `rules_classifier.py`, `_classify_by_body_shape()` + `should_purge_by_body_shape()` helpers, new `clipping` type in `UP_MAP` → `[[Clippings]]` MOC, restructured per-note loop in `classify_vault.py` (rules → purge gate → LM cascade), atomic manifest writer, `purged` counter threaded through summary + heartbeat + tqdm postfix.
+- **Tests**: 353 → 387 passing. New classes: `TestBodyShapeClippingRules`, `TestShouldPurgeByBodyShape`, `TestBodyShapeReason`, `TestTinyBodyDeletion`, `TestBodyShapeOrdering`. Six pre-existing tests updated where tiny convenience bodies would have triggered the new purge gate.
+- **Version**: `pyproject.toml` 0.2.3 → 0.3.0 (minor — new behaviour, no breaking changes). CHANGELOG entry `[0.3.0]` added.
+- **Operator docs**: `docs/2026-05-26-post-chunk-operator-checklist.md` (4-step post-run workflow: audit manifest → triage queue → prune Clippings → decide next chunk). `docs/RUNBOOK.md` cross-references it.
+- **Project memory saved**: `project_north_star.md` — "categorise for interview prep + lean delete for noise reduction".
+
+### Stats trend (chunks 1 → 4)
+
+| Chunk | Date | Folder | Notes | auto-rate | rules-catch | review-queue % | purged | lm-avg |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 2026-05-14 AM | Job Hunt | 16 | 100% | 0% | 0% | 0 | 26.2s |
+| 2 | 2026-05-14 PM | AWS | 691 | 73% | 10% | 27% | 0 | 8.4s |
+| 3 | 2026-05-15 AM | AWS | 2000 | 72% | 13% | 28% | 0 | 9.4s |
+| **4** | **2026-05-26 PM** | **AWS** | **700** | **85%** | **57%** | **14%** | **62** | **20.5s** |
+
+Headlines: review-queue ratio halved (28% → 14%), purge gate kicked in (62 deletions), rules-catch quadrupled (13% → 57% — body-shape rules doing their job). LM avg went UP (9.4s → 20.5s) — possibly LM Studio memory drift over the 1h52m run, worth a quick restart before the next chunk.
+
+### Where to focus next (operator)
+
+**Immediate (post-run operator checklist, ~45–60 min):**
+1. Run the audit script in `docs/2026-05-26-post-chunk-operator-checklist.md` Step 1 — eyeball the 62 manifest entries. Restore any of the 5 borderline ones if they look career-relevant.
+2. Open the new `classification-review.html` (97 cards) — triage via the helper-server bulk-delete UI. Most should resolve in 30 min.
+3. Browse `[[Clippings]]` in Obsidian. ~292 entries; most are pre-2020 Skitch screencaps with no recent reference value. Bulk-delete in Finder what you don't want.
+
+**Operational decision (not urgent):**
+- LM is now the bottleneck — 327 LM calls × 20.5s = ~1h52m of LM-bound time per 700-note chunk. With ~3,549 AWS notes remaining + ~4,000 elsewhere = ~7,500 more notes. At current rates that's ~6 chunks × ~2h each = 12h+ of additional runtime.
+- **Drafted but not built**: an Anthropic API adapter (`anthropic_classifier.py` + `--api anthropic` CLI flag). Would cut LM call latency from ~20s to ~1–3s, finishing the remaining vault in ~40 min wall-clock for ~$8 total cost. Trade-off: notes that don't hit the rules cascade get sent to Anthropic (privacy consideration). Worth a fast plan + build session if the operator wants the speed-up.
+
+### Next chunk command (drafted, not auto-launched per binding runner=human rule)
+
+Once the operator checklist is complete, the next AWS chunk:
+
+```bash
+# Restart LM Studio first if lm-avg is climbing (memory drift)
+scripts/classify/venv/bin/python scripts/classify/classify_vault.py \
+  --vault ~/Documents/ObsidianVault/Personal \
+  --folder "Evernote/notes/AWS" \
+  --limit 2000 --html
+```
+
+At ac:85% / rules:57%, a 2000-note chunk should produce ~1700 auto-classify + ~180 purge + ~280 review queue, finishing in ~3–4h. If `--limit 2000` feels too long, `--limit 1000` is the conservative call.
+
+### Untracked file
+
+- `AGENTS.md` (operator-authored, sitting since project start, never committed). Up to the operator whether to track it.
+
+---
+
 ## 2026-05-15 EARLY-AM AEST — ▶ RESUME HERE: AWS chunk 3 complete, FileNotFoundError race patched, operator-reference page live
 
 **Runner for next turn:** human (operator). Code stable. Triage backlog growing; rules-catch low. Next moves are about reducing review-queue debt, not adding more chunks.

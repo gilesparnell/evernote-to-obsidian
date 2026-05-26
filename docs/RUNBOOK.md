@@ -102,9 +102,9 @@ scripts/classify/venv/bin/python scripts/classify/classify_vault.py \
 # ...repeat until done
 ```
 
-**After AWS completes**:
-- Spot-check again: `sample_classified --folder "Evernote/notes/AWS" --n 20`
-- Inspect `classification-review.md` — likely ~2,000 entries. Don't try to clear it all manually; process opportunistically.
+**After every chunk** — not just AWS completion:
+- Run the four-step post-chunk operator checklist at **[`docs/2026-05-26-post-chunk-operator-checklist.md`](./2026-05-26-post-chunk-operator-checklist.md)**: audit deletion manifest → triage review queue → prune Clippings MOC → decide next chunk size. Roughly 45–60 min of human attention per chunk.
+- Spot-check classifications: `sample_classified --folder "Evernote/notes/AWS" --n 20`
 - The other Evernote folders (T-Systems / TSC / Personal NoteBook / Work-General / Cooking) follow the same pattern, smaller volumes.
 
 ### 4. Migration to Flat Vault
