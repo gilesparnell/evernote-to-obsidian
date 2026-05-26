@@ -13,9 +13,10 @@ Each entry is split into:
 
 ---
 
-## [0.3.0 → 0.4.0] — 2026-05-26
+## [0.3.0 → 0.4.1] — 2026-05-26 → 2026-05-27
 
 ### What's new
+- **`audit_manifest.py` CLI** replaces the ad-hoc heredoc Python the post-chunk checklist used to require. Defaults to showing the most recent run's deletions (what you want after every chunk). Pass `--all-runs` for the full history or `--limit N` for a sample. Removes a recurring source of copy-paste pain (multi-line heredoc + indentation errors + shell delimiter quirks).
 - **Audio notes now play inline.** A new `audio_link_fix.py` tool converts every `[name.m4a](./_resources/...)` markdown link Yarle exported into `![[name.m4a]]` Obsidian embed wikilinks. After running once, every audio note in the vault renders a real inline player (play/pause/seek). 84 audio links across 58 notes converted on first run. Idempotent — safe to re-run after any new Evernote import.
 - **Image-only, link-only, and embed-only notes no longer waste an LM call.** The classifier now recognises them on its own — Evernote Skitch screencaps, bare URLs, audio/PDF embeds. They land in a new `[[Clippings]]` MOC where you can review them in bulk via Obsidian's graph view rather than triaging them one at a time. Expected ~330 chunk-3 notes (of 566) auto-classified this way on the next AWS run.
 - **Tiny notes are now hard-deleted from the vault, not review-queued.** Bodies with under 30 chars of semantic content (phone numbers, one-line scribbles, leftover Evernote stubs) are removed on the spot. The vault becomes a curated brain instead of an archive of every scrap ever captured. Every deletion is recorded in `.classify_deleted_manifest.json` at the vault root with path, body preview, and timestamp — if a deletion ever surprises you, the manifest is the audit trail.
@@ -33,6 +34,8 @@ Each entry is split into:
 - Known gap: markdown-wrapped tel links (`[041 581 7988](tel:041%20581%207988)`) strip to 32 chars and survive to the review queue rather than purging. Documented v2 enhancement: smarter stripping that collapses `[text](url)` to just `text`. For now, manually delete via the helper-server UI.
 - `scripts/classify/audio_link_fix.py`: new CLI with `--vault`, `--folder`, `--dry-run` flags. Module-level `_AUDIO_LINK_RE` with negative-lookbehind `(?<!!)` so existing `![[name]]` embeds and `![alt](path)` image embeds are never re-wrapped (idempotent by construction). Per-file atomic tmp+rename writes mirror the iCloud-safe pattern in `frontmatter.write_frontmatter`. Files with zero audio links are not touched at all — preserves mtime and avoids iCloud sync churn. Reuses `classify_vault._iter_md_files` so the skip-list (wiki/, Personal-backup-*/, hidden dirs) matches the classifier's.
 - Tests: 387 → 412 passing. New `TestConvertAudioLinks` (13 tests for the regex transform), `TestProcessFile` (5 tests for atomic single-file write + idempotency + zero-link no-op), `TestProcessVault` (7 tests for skip-list + folder scope + summary counts). One pre-existing flaky test (`test_short_body_goes_to_review_with_too_short_reason`) fixed by adding the LM-mock that the rest of `TestClassifyVault` uses — was state-dependent on LM Studio's response.
+- `scripts/classify/audit_manifest.py`: new CLI with `load_manifest`, `latest_run_id`, `entries_for_run`, `format_entry`, `audit` functions. Defaults `--last-run-only` (overridable via `--all-runs`). 19 new tests in `tests/unit/classify/test_audit_manifest.py` covering missing manifest, corrupt JSON, multi-run filtering, formatting, and the limit cap.
+- Tests: 412 → 431 passing.
 
 ---
 

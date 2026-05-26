@@ -15,18 +15,11 @@ Run this checklist every time a classifier chunk finishes. Designed to take **45
 Confirm nothing important was hard-deleted on this run.
 
 ```bash
-python3 -c "
-import json, pathlib
-p = pathlib.Path.home() / 'Documents/ObsidianVault/Personal/.classify_deleted_manifest.json'
-d = json.loads(p.read_text())
-print(f'Total purged across all runs: {len(d[\"deleted\"])}\n')
-# Just this run's deletions (filter by latest run_id)
-latest_run = d['deleted'][-1]['run_id'] if d['deleted'] else None
-this_run = [e for e in d['deleted'] if e['run_id'] == latest_run]
-print(f'This run ({latest_run}): {len(this_run)} purged\n')
-for e in this_run:
-    print(f'  {e[\"path\"]:60s}  |  {e[\"body_preview\"]}')"
+scripts/classify/venv/bin/python scripts/classify/audit_manifest.py \
+  --vault ~/Documents/ObsidianVault/Personal
 ```
+
+Defaults to showing only the latest run's deletions (what you want post-chunk). Pass `--all-runs` to see every deletion ever, or `--limit 20` to cap output when the manifest is large.
 
 **Decision gate:** Skim the body previews. Look for anything that surprises you.
 
