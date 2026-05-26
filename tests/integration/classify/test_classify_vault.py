@@ -205,9 +205,17 @@ class TestClassifyVault:
         # bodies 30-49 chars hit the preserved 'too short' review-queue
         # path. This test exercises the latter window — historically it
         # used a < 30-char body; that case now purges instead.
+        #
+        # LM is mocked to a low-confidence result so the cascade doesn't
+        # accidentally auto-classify the ambiguous body when LM Studio is
+        # running with a model that happens to feel confident about it.
         note = tmp_path / "shorty.md"
         _write_note(note, body="between purge and min body length zone")  # 38 chars
-        result = classify_vault(vault=tmp_path)
+        with patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("note", "Personal", confidence=0.2),
+        ):
+            result = classify_vault(vault=tmp_path)
         assert result["needs_review"] == 1
         review = (tmp_path / "classification-review.md").read_text(encoding="utf-8")
         assert "too short" in review.lower()

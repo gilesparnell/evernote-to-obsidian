@@ -74,9 +74,20 @@ The body-shape rules dump all image-only / URL-only / embed-only notes into `[[C
 
 In Obsidian:
 1. Open `[[Clippings]]` (the MOC auto-stubs on first reference)
-2. Use the backlinks panel to see every clipping
+2. Create the file at the vault root with a Dataview query so you can see every clipping in a sortable table — the literal block is:
+
+   ````markdown
+   ```dataview
+   TABLE file.folder AS Folder, file.size AS Size
+   FROM "Evernote/notes/AWS"
+   WHERE type = "clipping"
+   SORT file.folder ASC
+   ```
+   ````
+
+   Triple backticks each on their own line — opening line is exactly ` ```dataview ` and closing line is exactly ` ``` `. The Dataview community plugin must be enabled.
 3. For each cluster (e.g. all `*.jpg.md` files from the same year): skim 3–5, decide keep-all / delete-all / individual review
-4. Bulk-delete via Finder (multi-select in `Evernote/notes/AWS/`)
+4. Bulk-delete via Obsidian's File Explorer (Cmd+Shift+E → multi-select with Shift/Cmd-click → Cmd+Delete) or Finder. Confirm Settings → Files & Links has "Deleted files: Move to system trash" so deletes are recoverable
 
 **Heuristic for keep-vs-delete:**
 - Pre-2020 work clippings with no recent reference value → delete
@@ -119,6 +130,24 @@ scripts/classify/venv/bin/python scripts/classify/classify_vault.py \
   --folder "Evernote/notes/AWS" \
   --limit <CHOSEN_LIMIT> --html
 ```
+
+---
+
+## One-time vault setup — convert audio markdown links to embeds
+
+Run once across the vault (not per chunk). Yarle's Evernote → Markdown export wrote audio attachments as `[name.m4a](./_resources/...)` markdown links, which Obsidian renders as broken hyperlinks (unescaped spaces in the path trip the resolver). Converting them to `![[name.m4a]]` embed wikilinks gives you inline audio players in every note.
+
+```bash
+# Preview what would change (no writes)
+scripts/classify/venv/bin/python scripts/classify/audio_link_fix.py \
+  --vault ~/Documents/ObsidianVault/Personal --dry-run
+
+# Apply for real (atomic per-file, only writes files that actually change)
+scripts/classify/venv/bin/python scripts/classify/audio_link_fix.py \
+  --vault ~/Documents/ObsidianVault/Personal
+```
+
+Idempotent — running twice is safe (re-runs find zero links to convert). Skip-list matches the classifier's (wiki/, Personal-backup-*/, hidden dirs).
 
 ---
 
