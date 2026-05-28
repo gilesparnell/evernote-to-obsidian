@@ -13,6 +13,21 @@ Each entry is split into:
 
 ---
 
+## [0.5.0] — 2026-05-28
+
+### What's new
+- **One title per note, not three.** Notes used to carry their title in three places — the filename, a `title:` frontmatter field, and (for meeting notes) a duplicate `# Title` heading at the top of the body. That was confusing to maintain. Now the filename is the single source of truth; Obsidian's "Show inline title" setting renders it as the visual heading. A one-time migration stripped the redundant `title:` field from 8,798 existing notes and removed 21 duplicate body headings. Genuine section headings were left untouched.
+
+### Under the hood
+- New `scripts/classify/strip_redundant_titles.py`: `strip_title_frontmatter` (removes the `title:` line from the frontmatter block only — body `title:` text is safe), `strip_matching_body_h1` (removes a leading `# X` heading ONLY when X matches the filename stem or de-prefixed title — conservative, leaves real section headings alone), `process_file` / `process_vault` with `--vault` / `--folder` / `--dry-run`. Atomic tmp+rename, idempotent, reuses `classify_vault._iter_md_files` skip-list.
+- 19 new tests in `tests/unit/classify/test_strip_redundant_titles.py`. Suite 431 → 450.
+- Migration applied to the live vault 2026-05-28 after a fresh backup (`~/Backups/ObsidianVault-pre-title-strip-2026-05-28.tar.gz`): 9,771 scanned, 8,798 titles stripped, 21 body H1s stripped. Re-run dry-run confirmed 0 remaining (idempotent). The 956 files still matching `^title:` are all body-text mentions, correctly untouched.
+- Companion change in granolaSync (commit `3159831`): `build_frontmatter` no longer emits `title:`, `doc_to_markdown` no longer emits the `# {title}` body heading, so future Granola exports are single-source from the start.
+- Safe because nothing downstream reads the frontmatter title: the classifier derives title from `md_path.stem`, and no Dataview query references it.
+- Plan: `docs/plans/2026-05-28-001-feat-title-single-source-of-truth-plan.md`.
+
+---
+
 ## [0.3.0 → 0.4.1] — 2026-05-26 → 2026-05-27
 
 ### What's new
