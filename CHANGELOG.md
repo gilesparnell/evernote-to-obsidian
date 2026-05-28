@@ -13,6 +13,22 @@ Each entry is split into:
 
 ---
 
+## [0.7.0] — 2026-05-28
+
+### What's new
+- **Start and stop the triage server from the panel.** The review/triage server used to be a launch command you had to copy into a terminal. Now it has **Start**, **Stop**, and **Open** buttons in the panel — start it, click Open to triage in the browser, Stop it when you're done. It runs in the background and doesn't block your classify runs.
+- **Click a note to open it in Obsidian.** "Classify vault (apply)" now logs each note as it's processed — `auto`, `review`, or `purged` — and every note path in the console is a clickable link that opens straight in Obsidian. No more hunting through the review file to find the note you want.
+- **Much easier to read.** The explanatory text under each tool was too faint against the dark background. Contrast is lifted across the board (now meets WCAG AA), tool descriptions wrap to two readable lines instead of a faint cut-off line, and the description sits clearly under each tool name.
+
+### Under the hood
+- `JobManager` gains a server lifecycle (`start_server`/`stop_server`/`server_status`) tracked separately from the one-shot job slot, so a running server never blocks a classify run; `terminate()` then `kill()` after a 5s grace. `review-server` registry entry is now a real `kind: "server"` with interpreter/argv/url; `validate_registry` enforces the server field set. New endpoints `POST /server/start`, `POST /server/stop`, `GET /server/status/<key>` (400 unknown/non-server, 409 already-running/not-running); detail pane shows Start/Stop/Open for server entries.
+- `classify_vault.py` gains `--log-notes`: prints `<decision>\t<relpath>[\t-> <type>]` per note via `tqdm.write`; the `classify-run` registry command passes it. `control_panel.linkify_console_output(text, vault)` HTML-escapes the stream and wraps vault `.md` paths in `obsidian://open` anchors (escape-first, so no XSS); `/status` returns `output_html`, the console renders it.
+- Readability: secondary greys lifted (`.tool-desc` grey-600 → grey-400 with 2-line clamp, `.detail .use` grey-400 → grey-300, command label/hints/sublabels raised); console links styled green/underlined.
+- Tests: 498 → 520 (server lifecycle 6, registry server 2, server endpoints 5, linkify 4, console-links integration 1, `--log-notes` 2, render controls 2).
+- Plan: `docs/plans/2026-05-28-003-feat-panel-servers-linkify-readability-plan.md`.
+
+---
+
 ## [0.6.0 → 0.6.1] — 2026-05-28
 
 ### What's new

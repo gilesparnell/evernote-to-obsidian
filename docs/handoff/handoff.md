@@ -4,7 +4,27 @@ Newest entry at top. Each entry is a resumable snapshot for a fresh Claude or Co
 
 ---
 
-## 2026-05-28 AEST — ▶ RESUME HERE: control panel SHIPPED (v0.6.0, Unit 4 done + committed), vault classification ~complete
+## 2026-05-28 AEST — ▶ RESUME HERE: panel v0.7.0 — server start/stop + console Obsidian links + readability (UNCOMMITTED)
+
+**Runner for next turn:** human (operator) decides. Plan `docs/plans/2026-05-28-003-feat-panel-servers-linkify-readability-plan.md` is `status: completed`. All four units built + tested; **NOT yet committed**, and the running panel (PID was 15851) still serves old code in memory until restarted.
+
+### What landed (uncommitted on disc)
+
+Three operator asks on the control panel, all done TDD:
+1. **Readability** (Unit 1, CSS): lifted secondary greys to WCAG AA; sidebar tool descriptions now wrap to 2 lines (grey-400) instead of a faint grey-600 ellipsis; `.detail .use` grey-300.
+2. **Server start/stop** (Units 2–3): `review-server` is now a runnable `kind: "server"` registry entry (review_server.py --vault Personal --port 8765, url http://localhost:8765). `JobManager.start_server/stop_server/server_status` track servers separately from the one-shot slot (a running server does NOT block classify). Endpoints `POST /server/start`, `POST /server/stop`, `GET /server/status/<key>`. Detail pane shows Start/Stop/Open for server entries.
+3. **Console Obsidian links** (Unit 4): `classify_vault --log-notes` prints `<decision>\t<relpath>[\t-> <type>]` per note (registry `classify-run` passes it). `control_panel.linkify_console_output()` escapes + wraps vault `.md` paths in `obsidian://open` anchors; `/status` returns `output_html`; JS renders it via innerHTML (escape-first, no XSS).
+
+Version 0.6.1 → **0.7.0**; CHANGELOG `[0.7.0]` added. **Full suite: 520 passed, 3 deselected.**
+
+### ▶ Next steps
+- **Commit** (uncommitted): control_panel.py, script_registry.py, classify_vault.py, the new/updated tests, the plan, pyproject, CHANGELOG, handoff. (`AGENTS.md` stays untracked.)
+- **Visual check**: restart the panel to see v0.7.0 (`obsidian-vault-control-panel.command` or `vault-panel`). The operator's old instance must be stopped first.
+- Operational step still pending: Business-vault migration (`migrate_vault.py`), surfaced in the panel.
+
+---
+
+## 2026-05-28 AEST — control panel SHIPPED (v0.6.0, Unit 4 done + committed), vault classification ~complete
 
 **Runner for next turn:** human (operator) decides the next step. The control-panel feature is now **complete and committed** — plan `docs/plans/2026-05-28-002-feat-local-script-control-panel-plan.md` is marked `status: completed`.
 

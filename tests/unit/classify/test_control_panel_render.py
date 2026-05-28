@@ -71,3 +71,16 @@ class TestRenderCatalog:
         html = render_catalog()
         assert "Obsidian Vault Control Panel" in html  # page title
         assert "Obsidian Vault Control" in html  # brand heading
+
+    def test_detail_pane_has_server_controls(self):
+        # Server entries need Start / Stop / Open instead of a single Run.
+        html = render_catalog()
+        assert 'id="d-start"' in html
+        assert 'id="d-stop"' in html
+        assert 'id="d-open"' in html
+
+    def test_server_row_carries_kind_and_url(self):
+        # The review server exposes its kind + url so the JS can wire Start/Open.
+        html = render_catalog()
+        assert 'data-kind="server"' in html
+        assert "http://localhost:8765" in html

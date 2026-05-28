@@ -319,6 +319,15 @@ def _classify_note_content(
     return result, lm_latency
 
 
+def _rel_to_vault(md_path: Path, vault: Path) -> str:
+    """Path relative to the vault root (for per-note logging / obsidian links).
+    Falls back to the absolute path if md_path is somehow outside the vault."""
+    try:
+        return str(md_path.relative_to(vault))
+    except ValueError:
+        return str(md_path)
+
+
 def _append_deletion_manifest(
     vault: Path, run_id: str, md_path: Path, body: str
 ) -> None:
@@ -373,8 +382,13 @@ def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
     limit: int | None = None,
     checkpoint_interval: int = DEFAULT_CHECKPOINT_INTERVAL,
     html_out: bool = False,
+    log_notes: bool = False,
 ) -> dict[str, Any]:
-    """Run classification across the vault. Returns a summary dict."""
+    """Run classification across the vault. Returns a summary dict.
+
+    ``log_notes`` prints one TAB-delimited line per processed note
+    (``<decision>\\t<relpath>[\\t-> <type>]``) via ``tqdm.write`` so the
+    control panel console can turn the paths into obsidian:// links."""
     review_queue: list[dict[str, Any]] = []
     processed_paths: list[str] = []
     auto_classified = 0
@@ -456,6 +470,8 @@ def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
                     md_path.unlink()
                     time.sleep(ICLOUD_SLEEP_SECONDS)
                 purged += 1
+                if log_notes:
+                    tqdm.write(f"purged\t{_rel_to_vault(md_path, vault)}", file=sys.stdout)
                 pbar.update(1)
                 _update_postfix(
                     pbar, auto_classified, len(review_queue),
@@ -495,6 +511,11 @@ def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
             auto_classified += 1
             if rules_won:
                 rules_auto_classified += 1
+            if log_notes:
+                tqdm.write(
+                    f"auto\t{_rel_to_vault(md_path, vault)}\t-> {chosen['type']}",
+                    file=sys.stdout,
+                )
         elif len(body) < MIN_BODY_LENGTH:
             # Short body that escaped both the clipping rules and the
             # purge gate (30 <= stripped chars < 50). Preserve the
@@ -507,6 +528,8 @@ def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
                 "confidence": 0.0,
                 "reason": "too short to classify",
             })
+            if log_notes:
+                tqdm.write(f"review\t{_rel_to_vault(md_path, vault)}", file=sys.stdout)
         else:
             review_queue.append({
                 "path": md_path,
@@ -517,6 +540,8 @@ def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
                     "reason", "low confidence from both classifiers"
                 ),
             })
+            if log_notes:
+                tqdm.write(f"review\t{_rel_to_vault(md_path, vault)}", file=sys.stdout)
 
         pbar.update(1)  # advance on classification attempt only
 
@@ -636,6 +661,12 @@ def main() -> None:
              "(self-contained, opens in any browser, links straight into "
              "Obsidian via obsidian:// URLs).",
     )
+    parser.add_argument(
+        "--log-notes", action="store_true",
+        help="Print one TAB-delimited line per processed note "
+             "(<decision>\\t<relpath>[\\t-> <type>]). The control panel uses "
+             "this to render clickable obsidian:// links for each note.",
+    )
     args = parser.parse_args()
 
     summary = classify_vault(
@@ -644,6 +675,7 @@ def main() -> None:
         dry_run=args.dry_run,
         limit=args.limit,
         html_out=args.html,
+        log_notes=args.log_notes,
     )
     purge_label = (
         f"purged={summary['purged']} (dry-run, no files removed)"

@@ -675,3 +675,26 @@ class TestBodyShapeOrdering:
         # Confirm the surviving file has meeting frontmatter
         text = one_on_one.read_text(encoding="utf-8")
         assert "type: meeting" in text
+
+
+class TestLogNotes:
+    """--log-notes prints one TAB-delimited line per processed note so the
+    control panel console can linkify the note paths into obsidian:// links."""
+
+    _BODY = (
+        "AWS S3 EC2 Lambda CloudWatch IAM standup meeting agenda action "
+        "items attendees retrospective minutes. Deployment pipeline and "
+        "capacity planning."
+    )
+
+    def test_log_notes_prints_per_note_decision(self, tmp_path: Path, capsys) -> None:
+        _write_note(tmp_path / "AWS standup notes.md", body=self._BODY)
+        classify_vault(vault=tmp_path, log_notes=True)
+        out = capsys.readouterr().out
+        assert "auto\tAWS standup notes.md\t-> meeting" in out
+
+    def test_no_per_note_lines_without_the_flag(self, tmp_path: Path, capsys) -> None:
+        _write_note(tmp_path / "AWS standup notes.md", body=self._BODY)
+        classify_vault(vault=tmp_path)
+        out = capsys.readouterr().out
+        assert "auto\t" not in out

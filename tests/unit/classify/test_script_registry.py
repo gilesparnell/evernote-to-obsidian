@@ -86,6 +86,26 @@ class TestValidateRegistry:
             reg.validate_registry(bad)
 
 
+class TestServerEntry:
+    def test_review_server_is_a_runnable_server(self):
+        from pathlib import Path
+        e = reg.get("review-server")
+        assert e.get("kind") == "server"
+        assert e.get("url")
+        for f in ("interpreter", "cwd", "argv"):
+            assert f in e, f"server entry missing {f}"
+        assert (Path(e["cwd"]) / e["argv"][0]).exists()
+
+    def test_validate_rejects_server_missing_url(self, tmp_path):
+        bad = [{
+            "key": "s", "name": "S", "use_case": "u", "tier": "link",
+            "kind": "server", "interpreter": "/usr/bin/python3",
+            "cwd": str(tmp_path), "argv": ["x.py"],
+        }]
+        with pytest.raises(ValueError, match="url|missing"):
+            reg.validate_registry(bad)
+
+
 class TestByTier:
     def test_groups_entries_by_tier(self):
         grouped = reg.by_tier()

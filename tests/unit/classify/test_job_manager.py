@@ -134,3 +134,69 @@ class TestGetStatus:
         jm = JobManager()
         with pytest.raises(KeyError):
             jm.get_status("no-such-job")
+
+
+def _server_entry(argv=None, interpreter=sys.executable, cwd=".",
+                  url="http://localhost:9999"):
+    """A fake long-running 'server' registry entry."""
+    return {
+        "key": "test-server",
+        "interpreter": interpreter,
+        "cwd": cwd,
+        "argv": argv or ["-c", "import time; time.sleep(30)"],
+        "url": url,
+        "kind": "server",
+    }
+
+
+class TestServerLifecycle:
+    def test_start_server_runs_and_reports_pid_and_url(self):
+        jm = JobManager()
+        st = jm.start_server("test-server", _server_entry())
+        try:
+            assert st["state"] == "running"
+            assert st["pid"]
+            assert st["url"] == "http://localhost:9999"
+            assert jm.server_status("test-server")["state"] == "running"
+        finally:
+            jm.stop_server("test-server")
+
+    def test_stop_server_transitions_to_stopped(self):
+        jm = JobManager()
+        jm.start_server("test-server", _server_entry())
+        jm.stop_server("test-server")
+        assert jm.server_status("test-server")["state"] == "stopped"
+
+    def test_start_when_already_running_raises(self):
+        import pytest
+        jm = JobManager()
+        jm.start_server("test-server", _server_entry())
+        try:
+            with pytest.raises(RuntimeError, match="running"):
+                jm.start_server("test-server", _server_entry())
+        finally:
+            jm.stop_server("test-server")
+
+    def test_stop_when_not_running_raises(self):
+        import pytest
+        jm = JobManager()
+        with pytest.raises(RuntimeError, match="not running"):
+            jm.stop_server("test-server")
+
+    def test_running_server_does_not_block_one_shot_job(self):
+        jm = JobManager()
+        jm.start_server("test-server", _server_entry())
+        try:
+            # A server must not occupy the one-shot slot.
+            assert jm.is_busy() is False
+            job_id = jm.start_job("test-job", _entry(["-c", "print('ok')"]))
+            st = _wait_done(jm, job_id)
+            assert st["state"] == "complete"
+        finally:
+            jm.stop_server("test-server")
+
+    def test_server_status_unknown_key_raises(self):
+        import pytest
+        jm = JobManager()
+        with pytest.raises(KeyError):
+            jm.server_status("never-started")

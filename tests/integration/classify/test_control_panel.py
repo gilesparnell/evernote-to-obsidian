@@ -21,13 +21,21 @@ from scripts.classify.control_panel import start_server
 
 
 def _fast_resolve(key: str) -> dict:
-    """Test registry: 'fast' prints instantly, 'slow' sleeps, others unknown."""
+    """Test registry: 'fast' prints instantly, 'slow' sleeps, 'srv' is a fake
+    long-running server, others unknown."""
     if key == "fast":
         return {"key": "fast", "interpreter": sys.executable, "cwd": ".",
                 "argv": ["-c", "print('panel ok')"]}
     if key == "slow":
         return {"key": "slow", "interpreter": sys.executable, "cwd": ".",
                 "argv": ["-c", "import time; time.sleep(0.5)"]}
+    if key == "srv":
+        return {"key": "srv", "interpreter": sys.executable, "cwd": ".",
+                "argv": ["-c", "import time; time.sleep(30)"],
+                "url": "http://localhost:9999", "kind": "server"}
+    if key == "logline":
+        return {"key": "logline", "interpreter": sys.executable, "cwd": ".",
+                "argv": ["-c", "print('auto\tEvernote/notes/x.md\t-> meeting')"]}
     raise KeyError(key)
 
 
@@ -143,6 +151,59 @@ class TestStatusEndpoint:
     def test_unknown_job_id_returns_404(self, running_server):
         code, _ = _get(running_server + "/status/deadbeef")
         assert code == 404
+
+
+class TestServerEndpoints:
+    def test_start_status_stop_cycle(self, running_server):
+        code, body = _post_json(running_server + "/server/start", {"key": "srv"})
+        assert code == 200
+        assert body["state"] == "running"
+        assert body["pid"]
+        assert body["url"] == "http://localhost:9999"
+
+        code, raw = _get(running_server + "/server/status/srv")
+        assert code == 200
+        assert json.loads(raw)["state"] == "running"
+
+        code, body = _post_json(running_server + "/server/stop", {"key": "srv"})
+        assert code == 200
+        assert body["state"] == "stopped"
+
+    def test_start_unknown_key_returns_400(self, running_server):
+        code, _ = _post_json(running_server + "/server/start", {"key": "nope"})
+        assert code == 400
+
+    def test_start_non_server_key_returns_400(self, running_server):
+        code, _ = _post_json(running_server + "/server/start", {"key": "fast"})
+        assert code == 400
+
+    def test_stop_when_not_running_returns_409(self, running_server):
+        code, _ = _post_json(running_server + "/server/stop", {"key": "srv"})
+        assert code == 409
+
+    def test_status_never_started_reports_stopped_with_url(self, running_server):
+        code, raw = _get(running_server + "/server/status/srv")
+        assert code == 200
+        data = json.loads(raw)
+        assert data["state"] == "stopped"
+        assert data["url"] == "http://localhost:9999"
+
+
+class TestConsoleLinks:
+    def test_status_output_html_linkifies_note_paths(self, running_server):
+        code, data = _post_json(running_server + "/run", {"key": "logline"})
+        assert code == 200
+        job_id = data["job_id"]
+        deadline = time.monotonic() + 10
+        st = {}
+        while time.monotonic() < deadline:
+            _, st = _post_json_get_status(running_server, job_id)
+            if st["state"] != "running":
+                break
+            time.sleep(0.05)
+        assert "output_html" in st
+        assert "obsidian://open" in st["output_html"]
+        assert "<a href=" in st["output_html"]
 
 
 def _post_json_get_status(base: str, job_id: str) -> tuple[int, dict]:

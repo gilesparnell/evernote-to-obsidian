@@ -34,6 +34,9 @@ _BUSINESS_VAULT = Path.home() / "Documents" / "ObsidianVault" / "Business"
 _TIERS_ORDER = ("daily", "occasional", "done", "link")
 _REQUIRED_RUNNABLE = {"key", "name", "use_case", "tier", "interpreter", "cwd", "argv"}
 _REQUIRED_LINK = {"key", "name", "use_case", "tier"}
+# A server is a long-running process the panel can start/stop; it needs the
+# run fields plus a url to open and a kind marker.
+_REQUIRED_SERVER = _REQUIRED_RUNNABLE | {"kind", "url"}
 
 
 SCRIPTS: list[dict[str, Any]] = [
@@ -61,6 +64,7 @@ SCRIPTS: list[dict[str, Any]] = [
             "scripts/classify/classify_vault.py",
             "--vault", str(_PERSONAL_VAULT),
             "--html",
+            "--log-notes",
         ],
     },
     {
@@ -151,8 +155,17 @@ SCRIPTS: list[dict[str, Any]] = [
     {
         "key": "review-server",
         "name": "Triage review queue",
-        "use_case": "Open the in-browser triage server for the classification review queue. Launch separately: review_server.py --vault <vault> --port 8765, then open http://localhost:8765.",
+        "use_case": "Start the in-browser triage server for the classification review queue, then open it to delete or reclassify notes. Start and Stop it here — it keeps running while you use other tools.",
         "tier": "link",
+        "kind": "server",
+        "interpreter": str(_VENV_PY),
+        "cwd": str(_REPO_ROOT),
+        "argv": [
+            "scripts/classify/review_server.py",
+            "--vault", str(_PERSONAL_VAULT),
+            "--port", "8765",
+        ],
+        "url": "http://localhost:8765",
     },
 ]
 
@@ -174,12 +187,19 @@ def validate_registry(entries: list[dict[str, Any]]) -> None:
         if tier not in _TIERS_ORDER:
             raise ValueError(f"{key}: unknown tier {tier!r}")
 
-        required = _REQUIRED_LINK if tier == "link" else _REQUIRED_RUNNABLE
+        kind = e.get("kind")
+        if kind == "server":
+            required = _REQUIRED_SERVER
+        elif tier == "link":
+            required = _REQUIRED_LINK
+        else:
+            required = _REQUIRED_RUNNABLE
         missing = required - e.keys()
         if missing:
             raise ValueError(f"{key}: missing fields {missing}")
 
-        if tier == "link":
+        # Display-only link entries have no script; servers and runnable do.
+        if tier == "link" and kind != "server":
             continue
 
         script = Path(e["cwd"]) / e["argv"][0]

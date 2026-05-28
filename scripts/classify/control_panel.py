@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import quote
 
 # Allow direct script invocation (`python scripts/classify/control_panel.py`).
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -69,6 +70,10 @@ class JobManager:
     def __init__(self) -> None:
         self._jobs: dict[str, dict[str, Any]] = {}
         self._active_id: str | None = None
+        # Long-running servers, tracked by registry key, separate from the
+        # one-shot job slot so a running server never blocks a classify run.
+        self._servers: dict[str, dict[str, Any]] = {}
+        self._server_procs: dict[str, subprocess.Popen] = {}
         self._lock = threading.Lock()
 
     def is_busy(self) -> bool:
@@ -140,6 +145,87 @@ class JobManager:
             if job_id not in self._jobs:
                 raise KeyError(job_id)
             return dict(self._jobs[job_id])
+
+    # ---- Long-running servers (start/stop), independent of the job slot ----
+
+    def start_server(self, key: str, entry: dict[str, Any]) -> dict[str, Any]:
+        """Spawn a long-running server process tracked by ``key``. Does NOT
+        occupy the one-shot job slot, so a running server never blocks a
+        classify run. Raises RuntimeError if one is already running for key."""
+        with self._lock:
+            existing = self._servers.get(key)
+            if existing and existing["state"] == "running":
+                raise RuntimeError(f"server {key} is already running")
+            rec = {
+                "state": "running",
+                "pid": None,
+                "url": entry.get("url"),
+                "output": "",
+                "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "key": key,
+            }
+            self._servers[key] = rec
+
+        cmd = [entry["interpreter"], *entry["argv"]]
+        try:
+            proc = subprocess.Popen(
+                cmd, cwd=entry["cwd"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1,
+            )
+        except OSError as e:
+            with self._lock:
+                rec["state"] = "failed"
+                rec["output"] = f"failed to start: {e}"
+            return self.server_status(key)
+
+        with self._lock:
+            rec["pid"] = proc.pid
+            self._server_procs[key] = proc
+        threading.Thread(
+            target=self._drain_server, args=(key, proc), daemon=True,
+        ).start()
+        return self.server_status(key)
+
+    def _drain_server(self, key: str, proc: subprocess.Popen) -> None:
+        """Stream a server's output into its record; mark stopped on exit."""
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            with self._lock:
+                if key in self._servers:
+                    self._servers[key]["output"] += line
+        proc.wait()
+        with self._lock:
+            if key in self._servers:
+                self._servers[key]["state"] = "stopped"
+            self._server_procs.pop(key, None)
+
+    def stop_server(self, key: str) -> dict[str, Any]:
+        """Terminate the server for ``key`` (escalating to kill after a short
+        grace). Raises RuntimeError if no server is running for that key."""
+        with self._lock:
+            proc = self._server_procs.get(key)
+            rec = self._servers.get(key)
+            if proc is None or rec is None or rec["state"] != "running":
+                raise RuntimeError(f"server {key} is not running")
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+        with self._lock:
+            if key in self._servers:
+                self._servers[key]["state"] = "stopped"
+            self._server_procs.pop(key, None)
+        return self.server_status(key)
+
+    def server_status(self, key: str) -> dict[str, Any]:
+        """Snapshot of a server's state. Raises KeyError if never started."""
+        with self._lock:
+            if key not in self._servers:
+                raise KeyError(key)
+            return dict(self._servers[key])
 
 _TIER_HEADINGS = {
     "daily": "Daily",
@@ -213,7 +299,7 @@ nav.tiers { flex: 1; padding: 8px 12px 32px; }
 .tier-head { padding: 0 12px; margin-bottom: 6px; }
 .tier-title { font-family: var(--mono); font-size: 10px; text-transform: uppercase;
   letter-spacing: 0.16em; color: var(--fainter); font-weight: 600; }
-.tier-sub { font-size: 11px; color: var(--fainter); margin-top: 1px; }
+.tier-sub { font-size: 11px; color: var(--faint); margin-top: 1px; }
 
 article.tool { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
   padding: 9px 12px; border-radius: var(--radius); border: 1px solid transparent; cursor: pointer;
@@ -230,11 +316,11 @@ article.tool.tier-done.active, article.tool.tier-done:hover { opacity: 1; }
 .tool .dot.complete { background: var(--accent); box-shadow: 0 0 7px var(--accent); }
 .tool .dot.failed { background: var(--err); box-shadow: 0 0 7px var(--err); }
 .tool .tool-text { min-width: 0; }
-.tool .tool-name { font-weight: 500; font-size: 13.5px; color: var(--dim); }
+.tool .tool-name { font-weight: 600; font-size: 13.5px; color: var(--text-2); }
 .tool:hover .tool-name { color: var(--text); }
 .tool.active .tool-name { color: var(--accent-text); font-weight: 600; }
-.tool .tool-desc { font-size: 11px; color: var(--fainter); white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; }
+.tool .tool-desc { font-size: 12px; color: var(--dim); margin-top: 3px; line-height: 1.45;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* ---- Main: detail + console ---- */
 .workspace { display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
@@ -244,9 +330,9 @@ article.tool.tier-done.active, article.tool.tier-done:hover { opacity: 1; }
   background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.25);
   border-radius: 999px; padding: 4px 12px; margin-bottom: 14px; }
 .detail h2 { font-size: 26px; font-weight: 700; color: #fff; letter-spacing: -0.02em; margin: 0 0 8px; }
-.detail .use { color: var(--dim); font-size: 14.5px; max-width: 64ch; margin: 0 0 20px; }
+.detail .use { color: var(--text-2); font-size: 15px; line-height: 1.6; max-width: 64ch; margin: 0 0 20px; }
 .cmd-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
-  text-transform: uppercase; color: var(--fainter); margin-bottom: 6px; }
+  text-transform: uppercase; color: var(--faint); margin-bottom: 6px; }
 .cmd { font-family: var(--mono); font-size: 12.5px; color: var(--accent-text);
   background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 12px 14px; overflow-x: auto; white-space: pre; margin-bottom: 20px; }
@@ -257,7 +343,14 @@ button.run { font-family: var(--sans); font-weight: 600; font-size: 14px; color:
 button.run:hover:not(:disabled) { background: var(--accent-text); }
 button.run:active:not(:disabled) { transform: scale(0.97); }
 button.run:disabled { opacity: 0.4; cursor: not-allowed; }
-.run-hint { font-size: 12.5px; color: var(--faint); }
+button.run.secondary { background: transparent; color: var(--text-2);
+  border: 1px solid var(--border); }
+button.run.secondary:hover:not(:disabled) { background: var(--card); color: var(--text); border-color: var(--err); }
+.open-link { font-family: var(--sans); font-weight: 600; font-size: 14px; text-decoration: none;
+  color: var(--accent-text); border: 1px solid rgba(34,197,94,0.4); border-radius: var(--radius);
+  padding: 9px 18px; transition: background 0.12s; }
+.open-link:hover { background: rgba(34,197,94,0.10); }
+.run-hint { font-size: 12.5px; color: var(--dim); }
 
 /* ---- Console (gray-900 card, like a SprintTracker panel) ---- */
 .console { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 20px 34px 26px;
@@ -279,6 +372,9 @@ button.run:disabled { opacity: 0.4; cursor: not-allowed; }
   white-space: pre-wrap; }
 .console-body.empty { display: flex; align-items: center; justify-content: center;
   color: var(--faint); font-family: var(--sans); }
+.console-body a { color: var(--accent-text); text-decoration: underline;
+  text-underline-offset: 2px; }
+.console-body a:hover { color: #86efac; }
 
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 @media (prefers-reduced-motion: reduce) { .dot, .pill::before { animation: none !important; } }
@@ -290,8 +386,9 @@ button.run:disabled { opacity: 0.4; cursor: not-allowed; }
 _PAGE_JS = """
 const detail = {
   badge: null, name: null, use: null, cmd: null, run: null, hint: null,
+  start: null, stop: null, open: null,
 };
-let consoleHead, consoleBody, consolePill, consoleLabel, currentKey = null;
+let consoleHead, consoleBody, consolePill, consoleLabel, currentKey = null, currentKind = '';
 
 function init() {
   detail.badge = document.getElementById('d-badge');
@@ -300,6 +397,9 @@ function init() {
   detail.cmd = document.getElementById('d-cmd');
   detail.run = document.getElementById('d-run');
   detail.hint = document.getElementById('d-hint');
+  detail.start = document.getElementById('d-start');
+  detail.stop = document.getElementById('d-stop');
+  detail.open = document.getElementById('d-open');
   consolePill = document.getElementById('c-pill');
   consoleLabel = document.getElementById('c-label');
   consoleBody = document.getElementById('c-body');
@@ -307,6 +407,8 @@ function init() {
     row.addEventListener('click', () => selectTool(row));
   });
   detail.run.addEventListener('click', runCurrent);
+  detail.start.addEventListener('click', startServer);
+  detail.stop.addEventListener('click', stopServer);
   const first = document.querySelector('article.tool:not(.tier-link)');
   if (first) selectTool(first);
 }
@@ -318,16 +420,82 @@ function selectTool(row) {
   row.classList.add('active');
   const d = row.dataset;
   currentKey = d.key;
+  currentKind = d.kind || '';
   detail.badge.textContent = TIER_LABEL[d.tier] || d.tier;
   detail.name.textContent = d.name;
   detail.use.textContent = d.use;
   detail.cmd.textContent = d.cmd || '—';
-  const isLink = d.tier === 'link';
-  detail.run.style.display = isLink ? 'none' : '';
-  detail.hint.textContent = isLink
-    ? 'Launch this server separately from a terminal, then open its own page.'
-    : (d.dry === '1' ? 'Safe preview — no changes are written.'
-       : 'This makes real changes to the vault.');
+  const isServer = d.kind === 'server';
+  const isLink = d.tier === 'link' && !isServer;
+  detail.run.style.display = (isServer || isLink) ? 'none' : '';
+  detail.start.style.display = isServer ? '' : 'none';
+  detail.stop.style.display = isServer ? '' : 'none';
+  detail.open.style.display = isServer ? '' : 'none';
+  if (isServer) {
+    detail.open.href = d.url || '#';
+    detail.hint.textContent = 'Starts a background server. Stop it here when you are done.';
+    refreshServer(d.key);
+  } else {
+    detail.hint.textContent = isLink
+      ? 'Launch this server separately from a terminal, then open its own page.'
+      : (d.dry === '1' ? 'Safe preview — no changes are written.'
+         : 'This makes real changes to the vault.');
+  }
+}
+
+async function refreshServer(key) {
+  try {
+    const res = await fetch('/server/status/' + encodeURIComponent(key));
+    const data = await res.json();
+    applyServerState(data);
+  } catch (e) { /* leave controls as-is */ }
+}
+
+function applyServerState(data) {
+  const running = data.state === 'running';
+  detail.start.disabled = running;
+  detail.stop.disabled = !running;
+  if (data.url) detail.open.href = data.url;
+  setStatus(running ? 'running' : (data.state === 'failed' ? 'failed' : ''),
+            running ? 'running' : (data.state || 'stopped'));
+  if (data.output) {
+    consoleBody.classList.remove('empty');
+    consoleBody.textContent = data.output;
+  }
+}
+
+async function startServer() {
+  if (!currentKey) return;
+  detail.start.disabled = true;
+  consoleLabel.firstChild.textContent = detail.name.textContent + ' ';
+  setStatus('running', 'starting');
+  try {
+    const res = await fetch('/server/start', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({key: currentKey})
+    });
+    const data = await res.json();
+    if (!res.ok) { setStatus('failed', res.status === 409 ? 'already running' : 'rejected');
+      consoleBody.classList.remove('empty'); consoleBody.textContent = data.error || ('HTTP ' + res.status);
+      detail.start.disabled = false; return; }
+    applyServerState(data);
+  } catch (e) { setStatus('failed', 'error'); detail.start.disabled = false; }
+}
+
+async function stopServer() {
+  if (!currentKey) return;
+  detail.stop.disabled = true;
+  try {
+    const res = await fetch('/server/stop', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({key: currentKey})
+    });
+    const data = await res.json();
+    if (!res.ok) { setStatus('failed', 'error');
+      consoleBody.classList.remove('empty'); consoleBody.textContent = data.error || ('HTTP ' + res.status);
+      detail.stop.disabled = false; return; }
+    applyServerState(data);
+  } catch (e) { detail.stop.disabled = false; }
 }
 
 function setStatus(state, text) {
@@ -366,7 +534,8 @@ async function runCurrent() {
 async function poll(jobId) {
   const res = await fetch('/status/' + jobId);
   const data = await res.json();
-  if (data.output) { consoleBody.textContent = data.output; consoleBody.scrollTop = consoleBody.scrollHeight; }
+  if (data.output_html != null) { consoleBody.innerHTML = data.output_html; consoleBody.scrollTop = consoleBody.scrollHeight; }
+  else if (data.output) { consoleBody.textContent = data.output; consoleBody.scrollTop = consoleBody.scrollHeight; }
   if (data.state === 'running') {
     setStatus('running', 'running');
     setTimeout(() => poll(jobId), 1200);
@@ -378,6 +547,30 @@ async function poll(jobId) {
 
 document.addEventListener('DOMContentLoaded', init);
 """
+
+
+_NOTE_DECISIONS = ("auto", "review", "purged")
+
+
+def linkify_console_output(text: str, vault_name: str) -> str:
+    """HTML-escape console output and turn classify ``--log-notes`` lines
+    (``<decision>\\t<relpath>.md[\\t...]``) into clickable ``obsidian://``
+    links. Everything is escaped first, so the only live markup is the
+    anchors we build — no path for the subprocess output to inject HTML."""
+    return "\n".join(_linkify_line(line, vault_name) for line in text.split("\n"))
+
+
+def _linkify_line(line: str, vault_name: str) -> str:
+    parts = line.split("\t")
+    if len(parts) >= 2 and parts[0] in _NOTE_DECISIONS and parts[1].endswith(".md"):
+        path = parts[1]
+        href = f"obsidian://open?vault={quote(vault_name)}&file={quote(path)}"
+        anchor = f'<a href="{_html.escape(href, quote=True)}">{_html.escape(path)}</a>'
+        head = _html.escape(parts[0]) + "\t"
+        rest = parts[2:]
+        tail = ("\t" + _html.escape("\t".join(rest))) if rest else ""
+        return head + anchor + tail
+    return _html.escape(line)
 
 
 def _command_preview(entry: dict[str, Any]) -> str:
@@ -404,7 +597,7 @@ def _render_tool_row(entry: dict[str, Any], job_state: dict | None) -> str:
     key = _html.escape(entry["key"])
     tier = entry["tier"]
     cmd = _html.escape(_command_preview(entry))
-    desc = _html.escape(entry["use_case"][:60] + ("…" if len(entry["use_case"]) > 60 else ""))
+    desc = _html.escape(entry["use_case"])
     classes = "tool"
     if tier == "done":
         classes += " tier-done"
@@ -413,11 +606,14 @@ def _render_tool_row(entry: dict[str, Any], job_state: dict | None) -> str:
     state = (job_state or {}).get("state", "")
     dot_cls = f"dot {state}" if state else "dot"
     dry = "1" if _is_dry(entry) else "0"
+    kind = _html.escape(entry.get("kind", ""))
+    url = _html.escape(entry.get("url", ""))
 
     return (
         f'<article class="{classes}" tabindex="0" '
         f'data-key="{key}" data-name="{name}" data-use="{use}" '
-        f'data-cmd="{cmd}" data-tier="{tier}" data-dry="{dry}">'
+        f'data-cmd="{cmd}" data-tier="{tier}" data-dry="{dry}" '
+        f'data-kind="{kind}" data-url="{url}">'
         f'<span class="{dot_cls}"></span>'
         f'<span class="tool-text">'
         f'<span class="tool-name">{name}</span>'
@@ -478,6 +674,9 @@ def render_catalog(job_states: dict[str, dict] | None = None) -> str:
         '<div class="cmd" id="d-cmd">—</div>'
         '<div class="run-row">'
         '<button class="run" id="d-run">Run</button>'
+        '<button class="run" id="d-start" style="display:none">Start server</button>'
+        '<button class="run secondary" id="d-stop" style="display:none">Stop</button>'
+        '<a class="open-link" id="d-open" style="display:none" target="_blank" rel="noopener">Open &#8599;</a>'
         '<span class="run-hint" id="d-hint"></span>'
         "</div>"
         "</section>\n"
@@ -539,23 +738,57 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/status/"):
             job_id = self.path[len("/status/"):]
             try:
-                self._send_json(200, self._jobs.get_status(job_id))
+                status = self._jobs.get_status(job_id)
             except KeyError:
                 self._send_json(404, {"error": "unknown job"})
+                return
+            status["output_html"] = linkify_console_output(
+                status.get("output", ""), self.server._vault.name,  # type: ignore[attr-defined]
+            )
+            self._send_json(200, status)
+            return
+        if self.path.startswith("/server/status/"):
+            key = self.path[len("/server/status/"):]
+            try:
+                self._send_json(200, self._jobs.server_status(key))
+            except KeyError:
+                # Never started — report stopped, with the url if it's a known
+                # server so the UI's Open link still works.
+                url = None
+                try:
+                    url = self._resolve(key).get("url")
+                except KeyError:
+                    pass
+                self._send_json(200, {"state": "stopped", "key": key, "url": url})
             return
         self._send_json(404, {"error": "not found"})
 
-    def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/run":
-            self._send_json(404, {"error": "not found"})
-            return
+    def _read_key(self) -> str | None:
+        """Read {'key': ...} from the request body. Sends 400 and returns
+        None if missing/invalid."""
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) if length else b"{}"
         try:
-            payload = json.loads(raw)
-            key = payload["key"]
+            return json.loads(raw)["key"]
         except (json.JSONDecodeError, KeyError, TypeError):
             self._send_json(400, {"error": "missing or invalid 'key'"})
+            return None
+
+    def do_POST(self) -> None:  # noqa: N802
+        if self.path == "/run":
+            self._handle_run()
+            return
+        if self.path == "/server/start":
+            self._handle_server_start()
+            return
+        if self.path == "/server/stop":
+            self._handle_server_stop()
+            return
+        self._send_json(404, {"error": "not found"})
+
+    def _handle_run(self) -> None:
+        key = self._read_key()
+        if key is None:
             return
         try:
             entry = self._resolve(key)
@@ -568,6 +801,36 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(409, {"error": str(e)})
             return
         self._send_json(200, {"job_id": job_id})
+
+    def _handle_server_start(self) -> None:
+        key = self._read_key()
+        if key is None:
+            return
+        try:
+            entry = self._resolve(key)
+        except KeyError:
+            self._send_json(400, {"error": f"unknown server key: {key}"})
+            return
+        if entry.get("kind") != "server":
+            self._send_json(400, {"error": f"{key} is not a server"})
+            return
+        try:
+            status = self._jobs.start_server(key, entry)
+        except RuntimeError as e:
+            self._send_json(409, {"error": str(e)})
+            return
+        self._send_json(200, status)
+
+    def _handle_server_stop(self) -> None:
+        key = self._read_key()
+        if key is None:
+            return
+        try:
+            status = self._jobs.stop_server(key)
+        except RuntimeError as e:
+            self._send_json(409, {"error": str(e)})
+            return
+        self._send_json(200, status)
 
 
 def start_server(
