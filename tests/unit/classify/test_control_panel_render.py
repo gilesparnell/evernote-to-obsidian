@@ -65,3 +65,9 @@ class TestRenderCatalog:
         html = render_catalog()
         assert cp.__version__
         assert f"v{cp.__version__}" in html
+
+    def test_brand_names_the_vault(self):
+        # The panel runs the whole vault toolkit, not just the classifier.
+        html = render_catalog()
+        assert "Obsidian Vault Control Panel" in html  # page title
+        assert "Obsidian Vault Control" in html  # brand heading

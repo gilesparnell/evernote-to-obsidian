@@ -93,7 +93,7 @@ class TestCatalogPage:
         code, body = _get(running_server + "/")
         assert code == 200
         assert "<!doctype html" in body.lower()
-        assert "Control Panel" in body
+        assert "Obsidian Vault Control Panel" in body
         # Real registry rendered → a known daily tool is present.
         assert "Audit deletions" in body
 

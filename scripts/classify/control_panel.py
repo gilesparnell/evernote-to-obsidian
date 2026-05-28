@@ -453,7 +453,7 @@ def render_catalog(job_states: dict[str, dict] | None = None) -> str:
         "<!doctype html>\n<html lang=\"en\">\n<head>\n"
         "<meta charset=\"utf-8\">\n"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-        "<title>Classifier Control Panel</title>\n"
+        "<title>Obsidian Vault Control Panel</title>\n"
         f"{_FONT_LINKS}\n"
         f"<style>{_PAGE_CSS}</style>\n</head>\n<body>\n"
         '<div class="shell">\n'
@@ -463,7 +463,7 @@ def render_catalog(job_states: dict[str, dict] | None = None) -> str:
         'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
         'stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'
         "</svg></span>"
-        '<div><h1>Classifier Control</h1>'
+        '<div><h1>Obsidian Vault Control</h1>'
         f'<div class="tag">Operator Console · v{__version__}</div></div>'
         "</div>\n"
         f'<nav class="tiers">{rail}</nav>\n'

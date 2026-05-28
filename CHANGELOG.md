@@ -13,7 +13,7 @@ Each entry is split into:
 
 ---
 
-## [0.6.0] — 2026-05-28
+## [0.6.0 → 0.6.1] — 2026-05-28
 
 ### What's new
 - **A control panel for the whole toolkit.** Instead of remembering which script does what and its exact command, open one local page that lists every operator tool grouped by how often you'd reach for it now — daily tools (classify new notes, audit deletions, spot-check, pull Granola) up top, the occasional vault-migration step next, the finished one-time migrations dimmed at the bottom. Click a tool to see what it does, when to run it, and the exact command; hit **Run** and watch its output stream live in the console with a status pill (idle → running → complete/failed + exit code). One job at a time, so two classifier runs can't race on the vault. Launch it with `scripts/classify/venv/bin/python scripts/classify/control_panel.py --port 8770` then open `http://127.0.0.1:8770`.
@@ -24,6 +24,7 @@ Each entry is split into:
 - UI matches the SprintTracker reference design (green-500 on grey-950, Geist + Geist Mono, shadcn-style nav rail). `__version__` is read from `pyproject.toml` (single source of truth) and shown in the brand tag + `/health`.
 - Tests: 450 → 492 (registry 14, render 9, job-manager 11, live-server integration 8). Full suite green.
 - Plan: `docs/plans/2026-05-28-002-feat-local-script-control-panel-plan.md`.
+- **0.6.1** — renamed the panel from "Classifier Control" to **"Obsidian Vault Control Panel"**: it runs the whole vault toolkit (classify, Granola export, audit, migrate), not just classification, so the classifier-centric name undersold it. Title + brand heading in `control_panel.py`; added an `obsidian-vault-control-panel.command` double-click launcher (resolves the repo root, polls `/health`, opens the browser, stops the server on close) guarded by 5 invariant tests that lock its port to the panel's `_DEFAULT_PORT`.
 
 ---
 
