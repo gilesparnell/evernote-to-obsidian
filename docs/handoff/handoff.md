@@ -4,6 +4,100 @@ Newest entry at top. Each entry is a resumable snapshot for a fresh Claude or Co
 
 ---
 
+## 2026-05-28 AEST — ▶ RESUME HERE: control panel SHIPPED (v0.6.0, Unit 4 done + committed), vault classification ~complete
+
+**Runner for next turn:** human (operator) decides the next step. The control-panel feature is now **complete and committed** — plan `docs/plans/2026-05-28-002-feat-local-script-control-panel-plan.md` is marked `status: completed`.
+
+### What landed this turn (Unit 4 — finalisation)
+
+- **Version 0.5.0 → 0.6.0** in `pyproject.toml` (minor — new CLI/feature).
+- **Version now visible in the panel**: `control_panel.py` reads `__version__` from `pyproject.toml` via `tomllib` (single source of truth), surfaced in `GET /health` (`{ok, version, vault}`) and the brand tag (`Operator Console · v0.6.0`). Added per the global Versioning Discipline. Tests written first (tdd-first): `test_health_reports_version` + `test_shows_version`.
+- **CHANGELOG** `[0.6.0]` entry added (new feature → new heading).
+- **Docs**: control-panel launch section added to `docs/2026-05-26-post-chunk-operator-checklist.md` (top) and `docs/RUNBOOK.md` (under Procedures, after Migration).
+- **Full suite: 492 passed, 3 deselected** (was 490 before the 2 version tests).
+
+### ⚠️ Operator manual smoke still outstanding (by design)
+
+The plan's Unit 4 includes a **manual browser smoke** the operator runs themselves (`runner=human` discipline — the plan does not auto-start a server). The integration test already boots a live server and exercises `/health`, `/`, `/run`, `/status` on an ephemeral port, so the panel is functionally verified — but eyeballing it in a browser is still worth doing:
+
+```bash
+scripts/classify/venv/bin/python scripts/classify/control_panel.py --port 8770
+# open http://127.0.0.1:8770 — run "Audit deletions" (safe) and watch running → complete
+```
+
+### ▶ Next operational step — Business-vault migration (NOT yet run)
+
+Classification is effectively done (whole-vault sweep 2026-05-28: 9593 already classified + 75 newly auto, only ~105 in the review queue). The next *operational* step is `migrate_vault.py` (dry-run first) to split work/personal notes into the Business vault — surfaced in the control panel as "Migrate to Business vault (dry-run/apply)". Higher blast radius (moves files across vaults); operator launches it, never auto-triggered.
+
+---
+
+## 2026-05-28 AEST — local control panel built (Units 1-3 done, UNCOMMITTED), vault classification ~complete
+
+**Runner for next turn:** human (operator) decides the next step. The control-panel feature is code-complete and tested but **NOT committed** — it was paused awaiting design sign-off (operator iterated on the look 3×; final version matches the SprintTracker design).
+
+### ⚠️ Uncommitted work on disc (survives reboot, but not yet in git)
+
+The **local script control panel** feature — Units 1-3 of `docs/plans/2026-05-28-002-feat-local-script-control-panel-plan.md`. New files (all untracked on `main`):
+
+- `scripts/classify/script_registry.py` — allowlist of runnable scripts (security boundary; `POST /run` takes a KEY, never a command string)
+- `scripts/classify/control_panel.py` — `JobManager` (async subprocess, one-at-a-time) + stdlib HTTP server (127.0.0.1) + `render_catalog` (the UI)
+- `tests/unit/classify/test_script_registry.py` (14), `test_control_panel_render.py` (8), `test_job_manager.py` (11)
+- `tests/integration/classify/test_control_panel.py` (7)
+- `docs/plans/2026-05-28-002-feat-local-script-control-panel-plan.md`
+
+**Full suite: 490 passed, 3 deselected** (was 450 before this feature). Re-confirm on resume:
+```bash
+scripts/classify/venv/bin/pytest -q
+```
+
+### What the control panel is
+
+A LOCAL web app (NOT Vercel — scripts need the local vault/LM Studio/venv; see decisions log). Master-detail app shell: left sidebar lists every operator script grouped by tier (daily/occasional/done/servers); main pane shows the selected tool's detail (what it does, when to run, exact command, Run button) + a persistent CONSOLE that streams the job's output with a status pill (idle/running/complete/failed + exit code). One-click run via subprocess.
+
+Launch it:
+```bash
+scripts/classify/venv/bin/python scripts/classify/control_panel.py --port 8770
+# open http://127.0.0.1:8770
+```
+
+**Design is settled** — matches the SprintTracker reference (green-500 `#22c55e` on grey-950 `#030712`, grey-900 cards, grey-800 borders, Geist + Geist Mono, shadcn `rounded-xl` nav with `green-500/10` active state, green icon-square brand). Do NOT revert to the earlier teal "Deep Ocean" look — the operator rejected it twice. Screenshots from the build: `/tmp/control_panel_st.png` (may not survive reboot).
+
+### ▶ Next step — Unit 4 (the only thing left on this feature)
+
+When the operator confirms the design is good, finalise + commit:
+1. Bump `pyproject.toml` 0.5.0 → **0.6.0** (minor — new CLI/feature)
+2. CHANGELOG `[0.6.0]` entry (What's new: a local control-panel page to run any toolkit script with one click + live logs; Under the hood: script_registry allowlist, JobManager async subprocess, 127.0.0.1 stdlib server, SprintTracker-matched UI)
+3. Add launch instructions to `docs/2026-05-26-post-chunk-operator-checklist.md` + a line in `docs/RUNBOOK.md`
+4. Mark the plan `status: completed`
+5. Commit (one `feat(classify): local script control panel` commit)
+
+### Vault state — classification is effectively DONE
+
+Last whole-vault sweep (2026-05-28 08:29→09:21 AEST, `folder=null`): scanned 9773, **9593 already classified + 75 newly auto-classified**, only **105 in the review queue**, 0 purged, lm-avg 17.2s, complete. The whole Personal vault is classified bar ~105 ambiguous notes. Migration to the Business vault (`migrate_vault.py`) is the next *operational* step but has NOT been run — it's surfaced in the control panel as "Migrate to Business vault (dry-run/apply)".
+
+### Everything else this session — COMMITTED
+
+evernote-to-obsidian `main`:
+- `af65282` title single-source-of-truth (stripped `title:` + duplicate H1 from 8,798 notes; migration applied after a fresh backup `~/Backups/ObsidianVault-pre-title-strip-2026-05-28.tar.gz`)
+- `a60d0b4` `audit_manifest.py` CLI (replaced the heredoc)
+- `4f3feee` audio link fix (84 audio links → Obsidian embeds across 58 notes; applied)
+- `234b75a` handoff/decisions docs
+- `db11a00` body-shape rules + tiny-note purge + Clippings MOC (v0.3.0)
+
+granolaSync `main`:
+- `3159831` filename = single source of truth (dropped `title:` frontmatter + body H1 from Granola exports)
+- `2bf2b5f` track Granola renames via frontmatter doc_id scan (fixes the orphan-on-rename bug)
+- granolaSync still has **2 known orphan pairs** from pre-fix renames (ANZ Mortgage, Macquarie Engineering Manager) — operator to manually delete one of each pair; a `--gc-orphans` flag was deferred.
+
+### Gotchas for the resuming session
+
+- `AGENTS.md` is untracked in BOTH repos (operator-authored, pre-existing) — leave it unless the operator says otherwise.
+- granolaSync's `docs/` is gitignored — its plan doc (`docs/plans/2026-05-28-001-fix-granola-rename-tracking-plan.md`) lives locally only.
+- The control panel binds 127.0.0.1 only by design (vault-deleting scripts must not face the network). Don't "helpfully" expose it.
+- pytest must run via the venv (`scripts/classify/venv/bin/pytest`) — bare pytest can't see PyYAML.
+
+---
+
 ## 2026-05-26 NIGHT AEST — ▶ RESUME HERE: body-shape rules shipped, chunk-3 review queue cut 566 → 97 (-83%)
 
 **Runner for next turn:** human (operator). Code stable, v0.3.0 shipped (commit `db11a00`), 387 tests green. Next moves are about the post-chunk operator checklist and deciding whether to add an Anthropic API adapter for the remaining ~7,800 notes.

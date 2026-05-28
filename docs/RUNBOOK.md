@@ -135,6 +135,17 @@ Migration log appends to `~/Documents/ObsidianVault/Business/migration-log.md`. 
 ... --confirm --limit 100
 ```
 
+### Control panel — run any procedure from one page
+
+A local web app that lists every toolkit script (grouped daily / occasional / done), shows the exact command, and runs it on one click with live streaming output and a status pill. Useful when you can't remember which script or flag you want.
+
+```bash
+scripts/classify/venv/bin/python scripts/classify/control_panel.py --port 8770
+# open http://127.0.0.1:8770
+```
+
+127.0.0.1-bound only (vault-deleting scripts stay off the network), one job at a time. `GET /health` reports the running version. The procedures above remain canonical; the panel only wraps them.
+
 ---
 
 ## Expected Output (Pass 2 — populated after pilot)

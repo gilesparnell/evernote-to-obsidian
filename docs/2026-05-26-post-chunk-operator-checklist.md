@@ -10,6 +10,19 @@ Run this checklist every time a classifier chunk finishes. Designed to take **45
 
 ---
 
+## Run any step from the control panel *(optional)*
+
+Rather than copy-pasting the commands below, you can launch the local control panel and run them with one click — it lists every toolkit script grouped by how often you'd reach for it, shows the exact command, and streams each run's output live with a status pill.
+
+```bash
+scripts/classify/venv/bin/python scripts/classify/control_panel.py --port 8770
+# then open http://127.0.0.1:8770
+```
+
+It binds to `127.0.0.1` only (the vault-deleting scripts must never face the network) and runs one job at a time. The raw commands in each step below remain the canonical reference — the panel just wraps them.
+
+---
+
 ## Step 1 — Audit the deletion manifest *(~5 min)*
 
 Confirm nothing important was hard-deleted on this run.

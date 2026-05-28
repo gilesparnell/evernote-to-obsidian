@@ -4,6 +4,24 @@ Project-local tactical decisions made during plan execution. Newest at top. Prom
 
 ---
 
+## 2026-05-28 AEST — Control panel version read from pyproject.toml, surfaced in /health + UI
+
+Unit 4 (finalisation) wired the running version into the control panel per the global Versioning Discipline (a `/health` endpoint that exists MUST report the version, and the version must be visible somewhere persistent in-app). `control_panel.py` now reads `__version__` from `pyproject.toml` via `tomllib` at import — single source of truth, no duplicated constant — and surfaces it in both `GET /health` (`{"ok", "version", "vault"}`) and the brand tag (`Operator Console · v0.6.0`). Tests written first per tdd-first: `test_health_reports_version` (integration) + `test_shows_version` (render). Bumped 0.5.0 → 0.6.0 (minor — new CLI/feature).
+
+## 2026-05-28 AEST — Control panel is LOCAL, not Vercel
+
+Operator asked for a Vercel-deployed web app to run the toolkit scripts. Rejected Vercel as architecturally impossible: every script needs the local Obsidian vault, the local LM Studio server (`localhost:1234`), and the project venv — none of which exist in Vercel's cloud serverless runtime. Built a `127.0.0.1`-bound stdlib `http.server` instead (sibling to `review_server.py`), which also keeps the vault-deleting scripts off the public internet. Security boundary: `POST /run` accepts a registry KEY from `script_registry.py`'s allowlist, never a command string — no arbitrary command execution. See plan `docs/plans/2026-05-28-002-feat-local-script-control-panel-plan.md`.
+
+## 2026-05-28 AEST — Control panel UI matches SprintTracker, not "Deep Ocean Tech"
+
+First two UI attempts used the global "Deep Ocean Tech" language (teal `#38bfa0`, Satoshi/Outfit, glass cards). Operator rejected both as not production-grade, then pointed at `parnell-systems/sprint-tracker/` as the reference. Replicated SprintTracker's actual system instead: green-500 `#22c55e` accent on grey-950 `#030712`, grey-900 cards, grey-800 borders, Geist + Geist Mono, shadcn `rounded-xl` nav with `green-500/10` active state, green icon-square brand. Tokens lifted from `sprint-tracker/src/app/globals.css` + the dashboard `sidebar-nav-link.tsx`. **Do not revert to teal** — that look was explicitly rejected twice. Note: this means the project now has TWO design languages — Deep Ocean for the docs/GitHub-Pages site (per global CLAUDE.md), SprintTracker-green for the operator control panel. They are deliberately separate.
+
+## 2026-05-28 AEST — Async one-job-at-a-time execution model for the control panel
+
+`classify_vault` runs for hours, so the control panel cannot block the HTTP request on subprocess completion. `JobManager.start_job` spawns `subprocess.Popen`, returns a job_id immediately, and a daemon thread drains stdout/stderr into an in-memory buffer; the page polls `GET /status/<id>`. Enforced ONE job at a time (raises on a second concurrent `start_job`) so two `classify_vault` runs can't race on the vault. In-memory job store only — jobs are lost on server restart, which is acceptable (no history requirement). Free-form argument input was deferred; destructive/long scripts instead get two fixed registry entries (a `--dry-run` variant and a real variant). See plan §Out of Scope.
+
+---
+
 ## 2026-05-26 AEST — New `clipping` type + `[[Clippings]]` MOC, not re-used `[[Reference]]`
 
 Body-shape rules (single image / URL / audio / PDF embed) produce a new R2 `type` value `clipping` mapped to a new `[[Clippings]]` MOC, rather than reusing the existing `[[Reference]]` MOC. Operator chose separation because: (a) `[[Reference]]` is for operator-authored knowledge — RFCs, cheatsheets, summaries — and mixing 300+ Evernote import artefacts would dilute that, (b) keeping clippings separate makes them easy to bulk-prune in Obsidian's graph view (most pre-2020 Skitch screencaps have no recent reference value), (c) reversing later is trivial (one entry in `UP_MAP`) whereas un-mixing later requires per-note retagging. One `UP_MAP` entry added to `scripts/classify/moc_map.py`; Obsidian auto-stubs `Clippings.md` on first wikilink resolution. See plan §"Type / MOC decisions".
