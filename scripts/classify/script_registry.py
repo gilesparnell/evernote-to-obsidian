@@ -80,6 +80,31 @@ SCRIPTS: list[dict[str, Any]] = [
         ],
     },
     {
+        "key": "dedup-dry",
+        "name": "Find duplicate copies (dry-run)",
+        "use_case": "Preview the byte-identical 'Title.1.md' copies Yarle left when two Evernote notes shared a title. No changes — counts + lists only.",
+        "tier": "daily",
+        "interpreter": str(_VENV_PY),
+        "cwd": str(_REPO_ROOT),
+        "argv": [
+            "scripts/classify/dedup_notes.py",
+            "--vault", str(_PERSONAL_VAULT),
+        ],
+    },
+    {
+        "key": "dedup-run",
+        "name": "Remove duplicate copies",
+        "use_case": "Delete the byte-identical 'Title.1.md' duplicate copies (the base note is kept). Each is moved to Trash and logged to the deletion manifest.",
+        "tier": "daily",
+        "interpreter": str(_VENV_PY),
+        "cwd": str(_REPO_ROOT),
+        "argv": [
+            "scripts/classify/dedup_notes.py",
+            "--vault", str(_PERSONAL_VAULT),
+            "--confirm",
+        ],
+    },
+    {
         "key": "sample",
         "name": "Spot-check classified notes",
         "use_case": "Sample 10 random classified notes to eyeball classification quality.",

@@ -4,7 +4,23 @@ Newest entry at top. Each entry is a resumable snapshot for a fresh Claude or Co
 
 ---
 
-## 2026-05-28 AEST — ▶ RESUME HERE: panel v0.7.0 — server start/stop + console Obsidian links + readability (UNCOMMITTED)
+## 2026-05-29 AEST — ▶ RESUME HERE: dedup tool for Yarle numbered copies (v0.8.0, UNCOMMITTED)
+
+**Runner for next turn:** human (operator). Plan `docs/plans/2026-05-29-001-feat-dedup-numbered-copies-plan.md` is `status: completed`. **NOT committed yet.**
+
+### What landed (uncommitted)
+New `scripts/classify/dedup_notes.py` — removes the `Title.1.md` exact-duplicate copies Yarle created when two Evernote notes shared a title. Deletes a numbered copy ONLY if its base `Title.md` exists and is byte-identical (`filecmp.cmp(shallow=False)`); base always kept; content-differing + base-less copies left for triage. Dry-run by default; `--confirm` moves to `~/.Trash/evernote-dedup-<date>/` + logs `.classify_deleted_manifest.json`. Reuses `_iter_md_files` (backup/wiki/hidden dirs skipped). Registry: `dedup-dry` + `dedup-run` (daily tier). 9 tests (`tests/unit/classify/test_dedup_notes.py`). Version 0.7.0 → **0.8.0**; CHANGELOG `[0.8.0]`.
+
+Context: the duplicates are a Yarle/Evernote data artefact, NOT a classifier bug — there was never a dedup spec, so TDD couldn't have caught it (test suites verify code-correctness, not input-data cleanliness). Measured baseline: 3,297 numbered files = 562 byte-identical (removable) + 2,625 same-title-different-content (kept) + 105 base-less.
+
+### ▶ Next steps
+- **Operator dry-run on the live vault**: `dedup-dry` in the panel (or `dedup_notes.py --vault <Personal>`) — expect ~562, deletes nothing. Eyeball the list, then `dedup-run` to remove.
+- **Commit** (uncommitted): dedup_notes.py, test_dedup_notes.py, script_registry.py, pyproject, CHANGELOG, the plan, decisions, handoff.
+- Still pending: Business-vault migration (`migrate_vault.py`).
+
+---
+
+## 2026-05-28 AEST — panel v0.7.0 — server start/stop + console Obsidian links + readability (committed 58689c8)
 
 **Runner for next turn:** human (operator) decides. Plan `docs/plans/2026-05-28-003-feat-panel-servers-linkify-readability-plan.md` is `status: completed`. All four units built + tested; **NOT yet committed**, and the running panel (PID was 15851) still serves old code in memory until restarted.
 

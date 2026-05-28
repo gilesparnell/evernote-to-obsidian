@@ -13,6 +13,19 @@ Each entry is split into:
 
 ---
 
+## [0.8.0] — 2026-05-29
+
+### What's new
+- **Clear out the duplicate "Title.1.md" notes.** The Evernote export tool (Yarle) appended a number to a note's filename whenever two notes shared a title — which is why you kept seeing near-identical notes ending in `.1` while triaging. A new tool finds the copies that are **byte-for-byte identical** to their original and removes them, keeping the original and leaving genuinely-different same-titled notes alone. It previews by default (lists what it would remove, changes nothing); run it again to confirm. Removed copies go to the Trash (recoverable) and are recorded in the deletion manifest. In the control panel: **Find duplicate copies (dry-run)** then **Remove duplicate copies**.
+
+### Under the hood
+- New `scripts/classify/dedup_notes.py`: `_base_path_for` maps `Title.<digits>.md` → `Title.md`; `is_exact_duplicate_copy` flags a numbered file only when the base exists and `filecmp.cmp(shallow=False)` is byte-identical; `find_duplicate_copies` walks via `classify_vault._iter_md_files` (so the wiki/backup/hidden skip-list is honoured — never dedupes inside a backup snapshot); `dedup_vault` is dry-run by default, and on `--confirm` moves each copy to `~/.Trash/evernote-dedup-<date>/` and logs it via the shared `_append_deletion_manifest`. Conservative by design: base always kept, content-differing pairs and base-less numbered files left for triage.
+- Registry: `dedup-dry` + `dedup-run` entries (daily tier). 9 tests in `tests/unit/classify/test_dedup_notes.py`.
+- Measured baseline on the Personal vault: 3,297 numbered files — ~562 byte-identical (removable), ~2,625 same-title-different-content (kept), ~105 with no base.
+- Plan: `docs/plans/2026-05-29-001-feat-dedup-numbered-copies-plan.md`.
+
+---
+
 ## [0.7.0] — 2026-05-28
 
 ### What's new

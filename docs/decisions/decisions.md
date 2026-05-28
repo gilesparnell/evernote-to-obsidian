@@ -4,6 +4,10 @@ Project-local tactical decisions made during plan execution. Newest at top. Prom
 
 ---
 
+## 2026-05-29 AEST — Dedup deletes only byte-identical numbered copies, never content-differing ones
+
+The `.1`/`.N` notes in the review queue come from Yarle appending a collision suffix when two Evernote notes share a title — not a classifier defect (the classifier never creates files; no dedup was ever specified, so no test could catch it). `dedup_notes.py` deletes a numbered copy ONLY when its base `Title.md` exists AND `filecmp.cmp(shallow=False)` is byte-identical. Chosen over body-only comparison (ignoring frontmatter) because byte-identical is the unambiguous-safe signal: of 3,297 numbered files, 562 are byte-identical (remove) but 2,625 share a title with *different* content (keep). Base always kept; base-less numbered files (105) left alone. Dry-run by default; `--confirm` moves to `~/.Trash/evernote-dedup-<date>/` (recoverable) + logs the shared deletion manifest. See [[project_north_star]] (curated vault) and plan `docs/plans/2026-05-29-001-feat-dedup-numbered-copies-plan.md`.
+
 ## 2026-05-28 AEST — Control panel version read from pyproject.toml, surfaced in /health + UI
 
 Unit 4 (finalisation) wired the running version into the control panel per the global Versioning Discipline (a `/health` endpoint that exists MUST report the version, and the version must be visible somewhere persistent in-app). `control_panel.py` now reads `__version__` from `pyproject.toml` via `tomllib` at import — single source of truth, no duplicated constant — and surfaces it in both `GET /health` (`{"ok", "version", "vault"}`) and the brand tag (`Operator Console · v0.6.0`). Tests written first per tdd-first: `test_health_reports_version` (integration) + `test_shows_version` (render). Bumped 0.5.0 → 0.6.0 (minor — new CLI/feature).
