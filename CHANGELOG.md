@@ -13,6 +13,17 @@ Each entry is split into:
 
 ---
 
+## [0.9.0] — 2026-05-29
+
+### What's new
+- **One button to pull Granola meetings and classify them.** Until now "Sync Granola meetings" only *pulled* new meetings into `Meetings/` — they sat unclassified until you ran the classifier separately. The new **Sync + classify Granola** does both in one click: pull, then classify just the `Meetings/` folder. Because the classifier skips notes it has already done, only the new meetings get processed. If the Granola pull fails (API/auth), it stops there rather than pretending it worked.
+
+### Under the hood
+- New `scripts/classify/sync_granola.py`: `sync_and_classify` runs the granolaSync export (`python3 export_granola.py`) then calls `classify_vault(folder="Meetings")`; export non-zero return → `status="export_failed"`, classify skipped. Export runner + classifier are injectable so the orchestration is unit-tested without hitting Granola's API or the real vault. 3 tests in `tests/unit/classify/test_sync_granola.py`.
+- Registry: `granola-sync` entry (daily tier) — runs under the venv, passes `--log-notes` so the new meetings show as clickable obsidian:// links in the console. The existing `granola` (pull-only) entry stays for when you just want the pull.
+
+---
+
 ## [0.8.0] — 2026-05-29
 
 ### What's new

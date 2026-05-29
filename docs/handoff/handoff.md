@@ -4,7 +4,23 @@ Newest entry at top. Each entry is a resumable snapshot for a fresh Claude or Co
 
 ---
 
-## 2026-05-29 AEST — ▶ RESUME HERE: dedup tool for Yarle numbered copies (v0.8.0, UNCOMMITTED)
+## 2026-05-29 AEST — ▶ RESUME HERE: one-click Granola sync+classify (v0.9.0, UNCOMMITTED)
+
+**Runner for next turn:** human (operator). **NOT committed yet.**
+
+### What landed (uncommitted)
+New `scripts/classify/sync_granola.py` — `sync_and_classify` runs the granolaSync export (`python3 export_granola.py`) then `classify_vault(folder="Meetings")` in one step; export failure → `status="export_failed"`, classify skipped. Export runner + classifier injectable → unit-tested without the Granola API/vault. Registry: `granola-sync` entry (daily tier, passes `--log-notes`); the old pull-only `granola` entry stays. Version 0.8.0 → **0.9.0**; CHANGELOG `[0.9.0]`. 3 tests (`tests/unit/classify/test_sync_granola.py`).
+
+Note: the operator's panel was observed running an OLD build (v0.7.0, no dedup buttons) — they need to restart (`vault-panel`) to pick up v0.8.0 (dedup) + v0.9.0 (granola-sync).
+
+### ▶ Next steps
+- **Commit** (uncommitted): sync_granola.py, test_sync_granola.py, script_registry.py, pyproject, CHANGELOG, handoff.
+- **Restart the panel** to expose the new buttons.
+- Project status: classification ~99.2% done (71 unclassified, ~106 in review queue). Headline remaining phase: **Business-vault migration** (`migrate_vault.py`, dry-run first) — never run.
+
+---
+
+## 2026-05-29 AEST — dedup tool for Yarle numbered copies (v0.8.0, committed 5b36752; 566 dupes removed to Trash)
 
 **Runner for next turn:** human (operator). Plan `docs/plans/2026-05-29-001-feat-dedup-numbered-copies-plan.md` is `status: completed`. **NOT committed yet.**
 
