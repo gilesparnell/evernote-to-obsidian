@@ -7,9 +7,9 @@ One-shot batch tooling for migrating an Evernote export into a structured Obsidi
 1. **Migrates Evernote** — extracts notes from `.enex` format, converts to Obsidian markdown (predates the May 2026 classifier work).
 2. **Classifies notes** — rules-first → LM Studio fallback (Gemma 4 E4B) cascade emitting the R2 schema: `type`, `org`, `context`, `people`, `tags`, `classify_confidence`.
 3. **Builds MOCs** — 16 Maps of Content across two vaults using Nick Milo's Dataview inbox pattern.
-4. **Migrates vault structure** — moves classified notes out of `Evernote/` subfolders into the right vault (work → Business, personal → Personal), flat root.
+4. **Migrates vault structure** — moves classified notes out of `Evernote/` subfolders into the right vault (work vs. personal) with a flat root.
 
-See `docs/plans/2026-05-13-001-feat-obsidian-knowledge-graph-beta-plan.md` for the full architecture and the 9-unit implementation plan.
+The classifier runs rules-first and only falls back to the local LLM for notes it can't resolve confidently, keeping most of the run fast and offline.
 
 ## What's in here
 
@@ -25,8 +25,7 @@ See `docs/plans/2026-05-13-001-feat-obsidian-knowledge-graph-beta-plan.md` for t
 | ↳ `migrate_legacy_up.py` | One-shot legacy `up:` rewriter |
 | ↳ `migrate_vault.py` | Move classified notes out of `Evernote/` subfolders |
 | `tests/unit/`, `tests/integration/` | 163 pytest tests |
-| `docs/plans/`, `docs/handoff/`, `docs/decisions/` | Plan, handover, tactical decisions |
-| `docs/index.html`, `docs/status-2026-05-14.html` | GitHub Pages site |
+| `docs/index.html` | GitHub Pages site |
 
 ## Quick start
 
@@ -45,21 +44,21 @@ scripts/classify/venv/bin/pytest -q
 # Live LM Studio smoke tests (requires running server)
 scripts/classify/venv/bin/pytest -m integration_live -v
 
-# Classify a folder (Stage 0a pilot: Job Hunt, ~35 notes)
+# Classify a single folder as a pilot before a full run
 scripts/classify/venv/bin/python scripts/classify/classify_vault.py \
-  --vault ~/Documents/ObsidianVault/Personal \
-  --folder "Job Hunt"
+  --vault /path/to/your/ObsidianVault \
+  --folder "SomeFolder"
 ```
 
-Project conventions live in `CLAUDE.md`.
+Every CLI defaults to a dry-run and supports `--help` with copy-paste examples.
 
 ## Related repo
 
-[`granolaSync`](https://github.com/gilesparnell/granolaSync) — the upstream daemon that pulls new Granola meeting notes into Obsidian daily, pre-classified with the same R2 schema. Both repos share canonical org names (`Amazon`, `T-Systems`, `TSC`, `Parnell Systems`) and the MOC names — if you change either, update both.
+[`granolaSync`](https://github.com/gilesparnell/granolaSync) — an upstream daemon that pulls new Granola meeting notes into Obsidian, pre-classified with the same schema. Both repos share the canonical org names and MOC names used by the classifier, so if you change one, update the other to match.
 
 ## Status
 
-All 9 plan units shipped on 2026-05-14. The classifier hasn't been run against the real vault yet — the next operational step is the Job Hunt pilot. See `docs/status-2026-05-14.html` for the full state breakdown.
+Core classifier and migration tooling are implemented, with 163 passing tests. Configure the org keywords, type keywords, and MOC map in `scripts/classify/` for your own vault before a full run.
 
 ## Licence
 

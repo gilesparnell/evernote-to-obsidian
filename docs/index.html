@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Evernote → Obsidian Knowledge Graph</title>
-<meta name="description" content="Classify and organise 10,000+ Evernote-imported notes into a universal Obsidian knowledge graph with MOCs (Maps of Content).">
+<meta name="description" content="Batch tooling that classifies Evernote-imported notes into a structured Obsidian knowledge graph with MOCs (Maps of Content).">
 <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap">
 <style>
@@ -153,101 +153,98 @@
   <!-- Hero -->
   <section class="hero">
     <div class="label">
-      <span class="badge badge--active">In progress</span>
-      Personal knowledge management · interview prep · 2026-05
+      <span class="badge badge--active">Open source</span>
+      Knowledge-graph tooling · Python
     </div>
-    <h1>Turn <span class="accent">10,000+ notes</span><br>into a navigable<br>knowledge graph.</h1>
+    <h1>Turn an <span class="accent">Evernote export</span><br>into a navigable<br>knowledge graph.</h1>
     <p class="tagline">
-      Classify every note imported from Evernote with a universal frontmatter schema.
-      Surface them through MOCs (Maps of Content) and Dataview queries. Built for serious
-      interview preparation: STAR stories, management evidence, architecture patterns —
-      all queryable in seconds.
+      Classify every note imported from Evernote with a universal frontmatter schema,
+      then surface them through MOCs (Maps of Content) and Dataview queries. A rules-first
+      classifier with a local-LLM fallback writes structured metadata so any note is one
+      query away.
     </p>
     <div class="stats-row">
-      <div class="stat"><div class="stat-value">10,604</div><div class="stat-label">Notes to classify</div></div>
-      <div class="stat"><div class="stat-value">11</div><div class="stat-label">MOCs across 2 vaults</div></div>
+      <div class="stat"><div class="stat-value">2</div><div class="stat-label">Stage classifier</div></div>
       <div class="stat"><div class="stat-value">15</div><div class="stat-label">Frontmatter types</div></div>
       <div class="stat"><div class="stat-value">0.80</div><div class="stat-label">Auto-classify threshold</div></div>
+      <div class="stat"><div class="stat-value">163</div><div class="stat-label">Pytest tests</div></div>
     </div>
   </section>
 
   <!-- Bento grid -->
-  <div class="section-label">Project artefacts</div>
+  <div class="section-label">What it does</div>
   <div class="bento">
 
-    <a href="diagrams/knowledge-graph-plan.html" class="card featured">
+    <a href="https://github.com/gilesparnell/evernote-to-obsidian" class="card featured">
       <div class="corner"></div>
       <div class="icon">◉</div>
-      <h3>Visual walkthrough of the plan</h3>
+      <h3>One note, many views</h3>
       <p class="desc">
-        Interactive page covering the core idea (one note, many views), the MOC structure,
-        every frontmatter field, the classification pipeline, example Dataview queries you'll
-        be able to write, and the before/after vault structure. Start here.
+        Every note carries a universal frontmatter schema — <code>type</code>, <code>org</code>,
+        <code>context</code>, <code>people</code>, <code>tags</code>, <code>up</code>. That single
+        record drives which Map of Content the note belongs to and makes it reachable from any
+        Dataview query. Classify once, surface everywhere.
       </p>
-      <div class="meta">Open visualisation →</div>
+      <div class="meta">View the repo →</div>
       <div class="arrow">→</div>
     </a>
 
-    <a href="https://github.com/gilesparnell/evernote-to-obsidian/blob/main/docs/plans/2026-05-13-001-feat-obsidian-knowledge-graph-beta-plan.md" class="card warm">
+    <div class="card warm">
       <div class="corner"></div>
-      <div class="icon">📋</div>
-      <h3>Implementation plan</h3>
+      <div class="icon">⚙</div>
+      <h3>Two-stage classifier</h3>
       <p class="desc">
-        Full 9-unit execution plan: LM Studio setup, vault backup, classifier code, MOC creation,
-        vault migration. Codex-vs-Claude runner tagging on every unit.
+        Keyword rules resolve the easy majority in milliseconds; uncertain notes fall through to a
+        local LLM (Gemma via LM Studio) using function calling. Notes above the confidence
+        threshold are written automatically.
       </p>
-      <div class="meta">2026-05-13 · 001 · beta</div>
-      <div class="arrow">→</div>
-    </a>
+      <div class="meta">rules → local LLM</div>
+    </div>
 
-    <a href="https://github.com/gilesparnell/evernote-to-obsidian/blob/main/docs/brainstorms/2026-05-13-obsidian-knowledge-graph-requirements.md" class="card blue">
+    <div class="card blue">
       <div class="corner"></div>
-      <div class="icon">💡</div>
-      <h3>Requirements (brainstorm)</h3>
+      <div class="icon">◫</div>
+      <h3>Maps of Content</h3>
       <p class="desc">
-        Problem frame, R1–R15 requirements, scope boundaries, success criteria,
-        and key decisions (confidence threshold, folder-as-hint, vault migration as separate step).
+        Nick Milo–style MOCs with self-maintaining Dataview inbox queries. A note appears in its
+        MOC the moment its <code>up:</code> wikilink is written — no manual index upkeep.
       </p>
-      <div class="meta">Origin doc · 2026-05-13</div>
-      <div class="arrow">→</div>
-    </a>
+      <div class="meta">self-maintaining</div>
+    </div>
 
-    <a href="https://github.com/gilesparnell/evernote-to-obsidian/blob/main/docs/plans/2026-04-23-001-feat-evernote-to-obsidian-migration-beta-plan.md" class="card purple">
+    <div class="card purple">
       <div class="corner"></div>
       <div class="icon">⤴</div>
-      <h3>Initial migration plan</h3>
+      <h3>Enex migration</h3>
       <p class="desc">
-        Original Evernote → Obsidian migration plan from April 2026. Yarle export, folder
-        preservation, basic frontmatter. The knowledge graph work extends from this foundation.
+        Converts an Evernote <code>.enex</code> export to Obsidian markdown, preserving folder
+        structure and attachments as the foundation the classifier builds on.
       </p>
-      <div class="meta">2026-04-23 · 001 · beta</div>
-      <div class="arrow">→</div>
-    </a>
+      <div class="meta">.enex → markdown</div>
+    </div>
 
-    <a href="operator-reference.html" class="card green">
+    <div class="card green">
       <div class="corner"></div>
       <div class="icon">⌘</div>
-      <h3>Operator reference</h3>
+      <h3>CLI toolkit</h3>
       <p class="desc">
-        Every CLI command, every flag, every progress-bar field explained. Single-page reference
-        for running the classifier and reading its output. Pairs with <code>RUNBOOK.md</code> for
-        troubleshooting and decision gates.
+        Batch pipeline, sampling and spot-check helpers, and a structure-migration step — each a
+        small CLI with <code>--dry-run</code> defaults and <code>--help</code> examples. 163 pytest
+        tests cover the classifier.
       </p>
-      <div class="meta">commands · flags · progress bar</div>
-      <div class="arrow">→</div>
-    </a>
+      <div class="meta">dry-run by default</div>
+    </div>
 
-    <a href="https://github.com/gilesparnell/evernote-to-obsidian/blob/main/docs/handoff/handoff.md" class="card coral">
+    <div class="card coral">
       <div class="corner"></div>
-      <div class="icon">↳</div>
-      <h3>Handoff log</h3>
+      <div class="icon">◈</div>
+      <h3>Graph-ready output</h3>
       <p class="desc">
-        Latest state of the plan, what's next, gotchas for the next session. Read this if
-        you're picking up the work after a break.
+        Inline <code>up::</code> Dataview fields draw radial MOC edges in Obsidian's graph view, so
+        the finished vault shows clear hubs instead of a hairball.
       </p>
-      <div class="meta">Newest entry on top</div>
-      <div class="arrow">→</div>
-    </a>
+      <div class="meta">radial MOC hubs</div>
+    </div>
 
   </div>
 
@@ -260,7 +257,7 @@
       <ul>
         <li>Every note gets <code>type</code>, <code>org</code>, <code>context</code>, <code>people</code>, <code>tags</code>, <code>up</code> written to its YAML frontmatter</li>
         <li><code>type</code> drives which MOC the note belongs to via <code>up:</code> wikilink</li>
-        <li><code>tags</code> include STAR markers, AWS leadership principles, status flags</li>
+        <li><code>tags</code> capture topic and status flags for later filtering</li>
         <li><code>classify_confidence</code> records how certain the classifier was</li>
       </ul>
     </div>
@@ -268,8 +265,8 @@
     <div class="how-card">
       <h4>Pipeline</h4>
       <ul>
-        <li>Rules-based scoring runs first (milliseconds, ~66% resolve)</li>
-        <li>Uncertain notes go to Gemma 4 E4B in LM Studio via function calling</li>
+        <li>Rules-based scoring runs first (milliseconds, resolves the easy majority)</li>
+        <li>Uncertain notes go to a local Gemma model in LM Studio via function calling</li>
         <li>Notes scoring ≥ 0.80 get frontmatter written automatically</li>
         <li>Notes &lt; 0.80 land in a review queue for manual classification</li>
       </ul>
@@ -279,7 +276,7 @@
       <h4>MOCs</h4>
       <ul>
         <li>Nick Milo–style Maps of Content with self-maintaining Dataview inbox queries</li>
-        <li>11 MOCs across two vaults — Meetings, Interview Prep, Leadership, Job Hunt, Patterns…</li>
+        <li>Each note type maps to a MOC hub — meetings, references, patterns, and more</li>
         <li>Notes appear automatically the moment <code>up:</code> is written</li>
         <li>Move into Organised sections as you work through the inbox</li>
       </ul>
@@ -288,9 +285,9 @@
     <div class="how-card">
       <h4>End state</h4>
       <ul>
-        <li>Zero <code>Evernote/</code> folders — flat structure in both vaults</li>
-        <li>Work notes live in Business vault, personal notes in Personal vault</li>
-        <li>Every meeting / STAR story / OLR note one Dataview query away</li>
+        <li>Zero <code>Evernote/</code> folders — a flat, classified vault structure</li>
+        <li>Work and personal notes routed to the right vault by context</li>
+        <li>Every meeting, reference, or pattern note one Dataview query away</li>
         <li>Graph view shows clear radial structure centred on MOC hubs</li>
       </ul>
     </div>
