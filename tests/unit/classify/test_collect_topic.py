@@ -1,4 +1,4 @@
-"""RED tests for future scripts.classify.collect_topic collector behavior.
+"""RED tests for future scripts.classify.collect_topic collector behaviour.
 
 T1 deliberately adds these tests before scripts/classify/collect_topic.py
 exists. Collection must fail with ModuleNotFoundError until T3 implements it.
@@ -95,9 +95,9 @@ class TestCollectTopicMatching:
         ]
 
     def test_word_boundary_rejects_substring_near_miss(self, tmp_path: Path) -> None:
-        data = _collect(FIXTURE_VAULT, _topic("sean", ["sean"]), tmp_path)
+        data = _collect(FIXTURE_VAULT, _topic("foo", ["foo"]), tmp_path)
 
-        assert all(source["path"] != "Oceanside plans.md" for source in data["sources"])
+        assert all(source["path"] != "Unrelated note.md" for source in data["sources"])
         assert data["sources"] == []
 
     def test_skip_list_and_topic_stubs_are_excluded_as_sources(
