@@ -140,6 +140,19 @@ SCRIPTS: list[dict[str, Any]] = [
         ],
     },
     {
+        "key": "synthesize",
+        "name": "Synthesize topic pages",
+        "use_case": "Generate or refresh Obsidian wiki topic pages from the collector cache.",
+        "tier": "daily",
+        "interpreter": str(_VENV_PY),
+        "cwd": str(_REPO_ROOT),
+        "argv": [
+            "scripts/classify/synthesize_topic.py",
+            "--vault", str(_PERSONAL_VAULT),
+            "--all",
+        ],
+    },
+    {
         "key": "migrate-dry",
         "name": "Migrate to Business vault (dry-run)",
         "use_case": "Preview splitting work-context notes into the Business vault — counts only, no moves.",
