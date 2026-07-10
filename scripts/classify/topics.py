@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -23,6 +23,7 @@ class Topic:
     aliases: list[str]
     status: str
     path: Path
+    exclude: list[str] = field(default_factory=list)
 
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
@@ -58,11 +59,19 @@ def load_topics(vault: Path) -> list[Topic]:
         if not all(isinstance(alias, str) for alias in aliases):
             raise ValueError(f"{path.name}: aliases must be a list of strings")
 
+        exclude = fm.get("exclude", [])
+        if not isinstance(exclude, list):
+            raise ValueError(f"{path.name}: exclude must be a list of glob patterns")
+        if not all(isinstance(pat, str) for pat in exclude):
+            raise ValueError(f"{path.name}: exclude must be a list of strings")
+
         status = fm.get("status", "active")
         if status == "paused":
             continue
 
-        topics.append(Topic(slug=slug, aliases=aliases, status=status, path=path))
+        topics.append(
+            Topic(slug=slug, aliases=aliases, status=status, path=path, exclude=exclude)
+        )
 
     validate(topics)
     return topics

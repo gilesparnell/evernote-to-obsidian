@@ -12,6 +12,7 @@ import json
 import re
 import sys
 import unicodedata
+from fnmatch import fnmatch
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Iterator
@@ -33,6 +34,12 @@ from scripts.classify.topics import Topic, load_topics
 _SMART_APOSTROPHES = str.maketrans({"’": "'", "‘": "'", "‛": "'", "`": "'"})
 _SENTENCE_RE = re.compile(r"[^.!?]+[.!?]|[^.!?]+$", re.DOTALL)
 _NUMBERED_COPY_RE = re.compile(r"\.\d+\.md$")
+
+
+def _is_excluded(rel: str, filename: str, patterns: Iterable[str]) -> bool:
+    return any(
+        fnmatch(rel, pat) or fnmatch(filename, pat) for pat in patterns
+    )
 
 
 def _prefers(candidate: str, incumbent: str) -> bool:
@@ -64,6 +71,13 @@ def collect_topic(*, vault: Path, topic: Topic, json_out: Path) -> Path:
         text = path.read_text(encoding="utf-8")
         body = _strip_frontmatter(text)
         rel = path.relative_to(vault).as_posix()
+
+        # Operator opt-out: a note matching any `exclude:` glob is dropped even
+        # when an alias matches it (glob tested against both the vault-relative
+        # path and the bare filename, so "Circuit Breakers_*" and "Evernote/*"
+        # both work).
+        if _is_excluded(rel, path.name, topic.exclude):
+            continue
 
         matched_aliases = _matched_aliases(
             aliases=topic.aliases,

@@ -133,6 +133,38 @@ class TestLoadTopics:
         assert [topic.slug for topic in topics] == ["real-topic"]
 
 
+class TestExcludeField:
+    def test_exclude_parsed_from_frontmatter(self, tmp_path: Path) -> None:
+        path = tmp_path / "wiki" / "topics" / "t.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "---\ntype: topic\nslug: t\naliases: [a]\n"
+            "exclude: ['Circuit Breakers_*', 'Evernote/*']\nstatus: active\n---\n",
+            encoding="utf-8",
+        )
+        topics = load_topics(tmp_path)
+        assert topics[0].exclude == ["Circuit Breakers_*", "Evernote/*"]
+
+    def test_exclude_defaults_to_empty_when_absent(self, tmp_path: Path) -> None:
+        path = tmp_path / "wiki" / "topics" / "t.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "---\ntype: topic\nslug: t\naliases: [a]\nstatus: active\n---\n",
+            encoding="utf-8",
+        )
+        assert load_topics(tmp_path)[0].exclude == []
+
+    def test_exclude_as_bare_string_is_an_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "wiki" / "topics" / "t.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "---\ntype: topic\nslug: t\naliases: [a]\nexclude: nope\nstatus: active\n---\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match=r"t\.md.*exclude.*list"):
+            load_topics(tmp_path)
+
+
 class TestSlugify:
     def test_nfkd_slugifies_curly_or_straight_apostrophe(self) -> None:
         assert slugify("Julie's") == "julies"
