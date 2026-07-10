@@ -13,6 +13,17 @@ Each entry is split into:
 
 ---
 
+## [0.11.0] — 2026-07-10
+
+### What's new
+- **The rest of the messy `.1`/`.2` notes are sorted, safely.** After the exact-duplicate cleanup, hundreds of numbered notes remained — but they weren't all the same problem. The new tool sorts them into four buckets: **orphans** (the number is a meaningless leftover — no original exists), **near-duplicates** (99%+ identical to the original), **review** (90–99% similar — worth a human glance), and **genuinely different** (real separate notes that just happened to share a title). It then *only* acts on the safe ones: it renames orphans back to a clean title (and fixes any links pointing at them so nothing breaks), and clears the near-duplicates to the Trash. The review and genuinely-different notes are reported but never touched. On the Personal vault this renamed 58 orphans and removed 56 near-duplicates, leaving the ~293 real distinct notes alone. Everything previews first and is recoverable.
+
+### Under the hood
+- New `scripts/classify/cleanup_numbered.py`: `classify_numbered` tiers `Title.N.md` by `difflib` body similarity (orphan / near_dup ≥0.99 / review 0.90–0.99 / different <0.90). `rename_orphans` (true orphans only; base-exists notes belong to other tiers) rewrites inbound wikilinks with exact-target matching (`[[Title.1]]`/`[[Title.1|a]]`/`[[Title.1#h]]`/`[[Title.1.md]]` → base, alias/heading preserved), atomic per-file; multi-orphan collisions skip rather than clobber. `delete_near_dups` reuses the dedup Trash+manifest path. Dry-run default, `--confirm` to act. 6 tests.
+- Known limitation: the orphan-rename dry-run under-reports multi-orphan collisions (it can't see files a later rename will create), so the confirmed count can be lower than previewed — safe, just less precise. Sequential-collision simulation is a future improvement.
+
+---
+
 ## [0.10.0] — 2026-07-10
 
 ### What's new
