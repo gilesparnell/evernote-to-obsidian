@@ -226,6 +226,97 @@ def test_inference_segregation_and_out_of_range_demotions(tmp_path: Path, monkey
     assert "Demoted unsupported sentence." in inferences
 
 
+def test_multi_source_citation_is_kept_not_demoted(tmp_path: Path, monkeypatch) -> None:
+    """A claim citing several in-range sources '(src: B1, B2)' must stay in the
+
+    factual section. The live T7 run showed every multi-source claim being
+    wrongly demoted to Inferences, emptying Summary/Key facts/Open questions.
+    """
+    vault = tmp_path / "vault"
+    topic = _write_topic(vault)
+    cache_dir = tmp_path / "cache"
+    two_sources = [
+        {"path": "source-one.md", "title": "Source One", "mtime": "2026-07-09",
+         "matched_aliases": ["Julie finances"], "quotes": ["q1"]},
+        {"path": "source-two.md", "title": "Source Two", "mtime": "2026-07-08",
+         "matched_aliases": ["Julie finances"], "quotes": ["q2"]},
+    ]
+    _write_source(vault, "source-one.md", "Julie finances one.")
+    _write_source(vault, "source-two.md", "Julie finances two.")
+    _write_cache(cache_dir, vault, sources=two_sources)
+    _patch_model(
+        monkeypatch,
+        _default_result(summary="Both sources agree on the grant. (src: B1, B2)"),
+    )
+
+    synthesize_topic.synthesize_topic(
+        vault=vault, topic_slug="julies-finances", client=FAKE_CLIENT, json_out=cache_dir
+    )
+
+    body = _generated_body(topic)
+    summary = body.split("## Timeline", 1)[0]
+    assert "Both sources agree on the grant. (src: B1, B2)" in summary
+
+
+def test_multi_source_citation_with_one_out_of_range_is_demoted(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """If ANY cited source in a multi-cite is out of range, the claim is still
+
+    demoted — an invented block number taints the whole claim.
+    """
+    vault = tmp_path / "vault"
+    topic = _write_topic(vault)
+    cache_dir = tmp_path / "cache"
+    _write_source(vault, "source-one.md", "Julie finances one.")
+    _write_cache(cache_dir, vault)  # single source → B2 is out of range
+    _patch_model(
+        monkeypatch,
+        _default_result(summary="Mixed valid and invented. (src: B1, B2)"),
+    )
+
+    synthesize_topic.synthesize_topic(
+        vault=vault, topic_slug="julies-finances", client=FAKE_CLIENT, json_out=cache_dir
+    )
+
+    body = _generated_body(topic)
+    inferences = body.split("## Inferences (not in the source)", 1)[1]
+    assert "Mixed valid and invented. (src: B1, B2)" in inferences
+
+
+def test_contradiction_callout_prefixes_every_line_and_has_no_blank_gap(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Every line of a multi-line contradiction must be '>'-prefixed with no
+
+    blank line after the marker, or Obsidian breaks out of the callout box.
+    """
+    vault = tmp_path / "vault"
+    topic = _write_topic(vault)
+    cache_dir = tmp_path / "cache"
+    _write_source(vault, "source-one.md", "Julie finances one.")
+    _write_cache(cache_dir, vault)
+    _patch_model(
+        monkeypatch,
+        _default_result(
+            contradictions="First conflicting line. (src: B1)\nSecond conflicting line. (src: B1)"
+        ),
+    )
+
+    synthesize_topic.synthesize_topic(
+        vault=vault, topic_slug="julies-finances", client=FAKE_CLIENT, json_out=cache_dir
+    )
+
+    body = _generated_body(topic)
+    callout = body.split("> [!contradiction]", 1)[1].split("## Open questions", 1)[0]
+    # no blank line immediately after the marker
+    assert not callout.startswith("\n\n")
+    # every non-empty content line is quote-prefixed
+    for line in callout.splitlines():
+        if line.strip():
+            assert line.startswith(">"), f"callout line not prefixed: {line!r}"
+
+
 def test_unknown_wikilinks_are_stripped_but_known_links_remain(
     tmp_path: Path, monkeypatch
 ) -> None:

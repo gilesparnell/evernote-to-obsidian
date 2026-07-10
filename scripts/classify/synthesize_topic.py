@@ -1,4 +1,4 @@
-"""Synthesize Obsidian topic pages from collector caches."""
+"""Synthesise Obsidian topic pages from collector caches."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import re
+import sys
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,6 +15,11 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel
+
+# Allow direct script invocation (the control panel runs the file directly).
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.classify.classify_vault import _strip_frontmatter
 from scripts.classify.collect_topic import collect_topic, topic_cache_path
@@ -41,12 +47,25 @@ class SynthesisResult:
     source_count: int = 0
 
 
-_SOURCE_RE = re.compile(r"\(src:\s*B(\d+)\)")
+# A citation group may name several sources: "(src: B1, B2, B10)". Match the
+# whole group, then pull every Bn out of it — the model routinely cites more
+# than one source per claim, and treating that as "uncited" wrongly demotes it.
+_SOURCE_RE = re.compile(r"\(src:([^)]*)\)")
+_BNUM_RE = re.compile(r"B(\d+)")
 _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
 _SENTENCE_RE = re.compile(
-    r".*?[.!?](?:\s*\(src:\s*B\d+\))?(?=\s+|$)|.+$",
+    r".*?[.!?](?:\s*\(src:[^)]*\))?(?=\s+|$)|.+$",
     re.MULTILINE,
 )
+
+
+def _cited_refs(text: str) -> list[int]:
+    """Every source block number cited in `text`, across multi-source groups."""
+    return [
+        int(n)
+        for group in _SOURCE_RE.findall(text)
+        for n in _BNUM_RE.findall(group)
+    ]
 
 
 def compute_confidence(*, source_count: int, quality: float) -> float:
@@ -201,7 +220,11 @@ def assemble_generated_markdown(
             inferences,
         )
         if contradiction:
-            parts.extend(["> [!contradiction]", f"> {contradiction}"])
+            quoted = "\n".join(
+                f"> {line}" if line.strip() else ">"
+                for line in contradiction.splitlines()
+            )
+            parts.append(f"> [!contradiction]\n{quoted}")
 
     parts.extend(
         [
@@ -290,7 +313,7 @@ def _verified_section(
         cleaned = _strip_unknown_wikilinks(sentence.strip(), whitelist)
         if not cleaned:
             continue
-        refs = [int(match) for match in _SOURCE_RE.findall(cleaned)]
+        refs = _cited_refs(cleaned)
         if refs and all(1 <= ref <= source_count for ref in refs):
             kept.append(cleaned)
         else:

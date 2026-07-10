@@ -150,6 +150,26 @@ class TestCollectTopicMatching:
         assert all(source["path"] != "Random garden.md" for source in data["sources"])
 
 
+class TestCollectTopicDedup:
+    def test_body_identical_notes_collapse_to_one_source_preferring_base(
+        self, tmp_path: Path
+    ) -> None:
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        body = "---\ntitle: x\n---\n\nJulie finances shared body text.\n"
+        # numbered copy differs only in frontmatter; body is identical
+        (vault / "Note.md").write_text(body, encoding="utf-8")
+        (vault / "Note.1.md").write_text(
+            "---\ntitle: x\ntags: [polished]\n---\n\nJulie finances shared body text.\n",
+            encoding="utf-8",
+        )
+
+        data = _collect(vault, _topic("julies-finances", ["Julie finances"]), tmp_path)
+        paths = [s["path"] for s in data["sources"]]
+
+        assert paths == ["Note.md"], paths  # one source, base preferred over .1
+
+
 class TestCollectTopicCache:
     def test_cache_schema_and_path_follow_data_contract(self, tmp_path: Path) -> None:
         vault = tmp_path / "fixture-vault"

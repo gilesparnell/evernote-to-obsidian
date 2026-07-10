@@ -236,11 +236,14 @@ def generate_structured(
     last_error = ""
 
     for attempt in range(max_retries + 1):
+        # No response_format: LM Studio's OpenAI-compat server rejects
+        # type="json_object" (400 — accepts only "json_schema" or "text").
+        # The 3-tier parser extracts JSON from plain text, so the default
+        # (text) mode is what we want. See plans/decisions.md 2026-07-10.
         response = client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=0,
-            response_format={"type": "json_object"},
         )
         raw = _content_from_response(response)
         parse_raw = raw if isinstance(raw, str) else ""

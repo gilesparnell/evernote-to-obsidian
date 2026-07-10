@@ -10,10 +10,16 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Iterator
+
+# Allow direct script invocation (the control panel runs the file directly).
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.classify.classify_vault import (
     _SKIP_TOP_LEVEL_EXACT,
@@ -26,6 +32,19 @@ from scripts.classify.topics import Topic, load_topics
 
 _SMART_APOSTROPHES = str.maketrans({"’": "'", "‘": "'", "‛": "'", "`": "'"})
 _SENTENCE_RE = re.compile(r"[^.!?]+[.!?]|[^.!?]+$", re.DOTALL)
+_NUMBERED_COPY_RE = re.compile(r"\.\d+\.md$")
+
+
+def _prefers(candidate: str, incumbent: str) -> bool:
+    """True if `candidate` should replace `incumbent` as the kept body-dupe.
+
+    Prefer the non-numbered base (`Title.md` over `Title.1.md`); tie-break by
+    shortest then lexical order so the choice is deterministic.
+    """
+    def key(path: str) -> tuple[bool, int, str]:
+        return (bool(_NUMBERED_COPY_RE.search(path)), len(path), path)
+
+    return key(candidate) < key(incumbent)
 
 
 def topic_cache_path(*, vault: Path, slug: str, json_out: Path) -> Path:
@@ -36,8 +55,10 @@ def collect_topic(*, vault: Path, topic: Topic, json_out: Path) -> Path:
     json_out.mkdir(parents=True, exist_ok=True)
     cache_path = topic_cache_path(vault=vault, slug=topic.slug, json_out=json_out)
 
-    sources: list[dict[str, Any]] = []
-    hash_pairs: list[tuple[str, str]] = []
+    # body_sha -> (source dict, hash pair). Yarle leaves numbered copies
+    # (Title.N.md) whose body is identical to the base but whose classifier
+    # frontmatter diverges; collapse them to one source, preferring the base.
+    by_body: dict[str, tuple[dict[str, Any], tuple[str, str]]] = {}
 
     for path in _iter_source_notes(vault):
         text = path.read_text(encoding="utf-8")
@@ -55,17 +76,20 @@ def collect_topic(*, vault: Path, topic: Topic, json_out: Path) -> Path:
         fm = read_frontmatter(path)
         title = fm.get("title")
         body_sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
-        hash_pairs.append((rel, body_sha))
+        source = {
+            "path": rel,
+            "title": title if isinstance(title, str) and title else path.stem,
+            "mtime": _mtime_iso(path),
+            "matched_aliases": matched_aliases,
+            "quotes": _quotes(body=body, aliases=topic.aliases),
+        }
+        existing = by_body.get(body_sha)
+        if existing is None or _prefers(rel, existing[0]["path"]):
+            by_body[body_sha] = (source, (rel, body_sha))
 
-        sources.append(
-            {
-                "path": rel,
-                "title": title if isinstance(title, str) and title else path.stem,
-                "mtime": _mtime_iso(path),
-                "matched_aliases": matched_aliases,
-                "quotes": _quotes(body=body, aliases=topic.aliases),
-            }
-        )
+    ordered = sorted(by_body.values(), key=lambda item: item[0]["path"])
+    sources = [item[0] for item in ordered]
+    hash_pairs = [item[1] for item in ordered]
 
     data = {
         "slug": topic.slug,

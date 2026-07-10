@@ -68,6 +68,20 @@ def test_tier_1_clean_json_parses_first_try() -> None:
     assert "Fill in this exact JSON structure" in client.calls[0]["messages"][0]["content"]
 
 
+def test_does_not_send_json_object_response_format() -> None:
+    """LM Studio 400s on response_format.type='json_object' (only json_schema/text).
+
+    The 3-tier parser extracts JSON from plain text, so we must not pin the
+    unsupported json_object mode. Regression guard for the T7 live 400.
+    """
+    client = FakeClient(['{"summary":"Clean","tags":["one"]}'])
+
+    generate(client)
+
+    rf = client.calls[0].get("response_format")
+    assert rf is None or rf.get("type") != "json_object"
+
+
 def test_tier_2_fenced_json_is_extracted_and_parsed() -> None:
     client = FakeClient(['```json\n{"summary":"Fenced","tags":["json"]}\n```'])
 
