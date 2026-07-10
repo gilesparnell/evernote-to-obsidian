@@ -26,6 +26,9 @@ Icon?
 
 # ─── Personal data: never commit Evernote exports or backups ─
 # These contain private notes — public repo MUST NOT include them.
+# plans/ holds working plans that reference personal note content;
+# docs/ is the public GitHub Pages root, so plans live here instead.
+plans/
 *.enex
 *.db
 en_backup.*
@@ -46,3 +49,6 @@ tmp/
 # ─── Generated review queues from classifier runs ───────────
 classification-review.md
 .classify_checkpoint.json
+
+# Collector machine-layer cache (never committed)
+scripts/classify/.topic_cache/

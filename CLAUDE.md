@@ -34,7 +34,7 @@ Live integration tests are marked `@pytest.mark.integration_live` and skipped by
 
 ## Plan-driven workflow
 
-Plans live in `docs/plans/`. Handover state in `docs/handoff/handoff.md` (newest entry at top). Tactical decisions in `docs/decisions/decisions.md`. **Update the handoff entry when finishing any plan unit** — that's how a fresh session resumes mid-flight.
+Plans, handoff, and decisions live in the **gitignored `plans/`** directory — `plans/*.md` (plans), `plans/handoff.md` (newest entry at top), `plans/decisions.md`. They are private working files: this repo is public and `docs/` is the GitHub Pages root, so plan content (which may reference personal note content) must NEVER live under `docs/`. `plans/` exists only on this machine — not backed up by git. **Update the handoff entry when finishing any plan unit** — that's how a fresh session resumes mid-flight.
 
 ## Related repo
 

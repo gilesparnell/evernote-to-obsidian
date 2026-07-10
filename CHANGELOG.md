@@ -13,6 +13,20 @@ Each entry is split into:
 
 ---
 
+## [0.10.0] — 2026-07-10
+
+### What's new
+- **Topic pages that write themselves.** Point the tool at a topic — say, Julie's finances — by listing a few phrases it goes by (aliases), and it scans your whole vault, finds every note that mentions it (even untitled ones and notes where the phrase is only in the body), and compiles a single page: a summary, a dated timeline, key facts, open questions, and a linked list of every source note it drew from. Every sentence is tagged with which source it came from, so you can trust it and click straight through. If two notes disagree — like a grant number recorded two different ways — it flags the contradiction instead of quietly picking one. Anything the model *guessed* rather than read is fenced off in a separate "Inferences" section, so you always know what the page actually knows versus what it inferred. It runs on your own machine (LM Studio), so nothing leaves your laptop. You can edit your own notes into a protected region of the page and re-running the tool never touches them.
+- **The messy `.1` duplicate notes are cleaned up properly now.** The previous cleanup only caught copies that were *byte-for-byte* identical. But most Yarle `.1.md` copies had the same content with slightly different auto-classification tags — so they slipped through. The new **body-only** mode matches on the note's actual content (ignoring the classification frontmatter), keeps the better-classified original, and clears the rest to the Trash (recoverable). This run removed 397 of them from the Personal vault.
+
+### Under the hood
+- New synthesis pipeline in `scripts/classify/`: `topics.py` (stub discovery, NFKD slugify, alias-overlap validation), `collect_topic.py` (word-boundary + unicode-fold alias matching, frontmatter-stripped body scan, `source_set_hash` over body only, body-identical dedup preferring the non-numbered base), `synthesis_prompt.py` (gemma-constrained prose-only prompt + `wiki/SCHEMA.md` conventions + page template with `@generated`/`@user` sentinels), `structured_output.py` (3-tier JSON engine ported from kytmanov, OpenAI-SDK-adapted), `wiki_io.py` (sentinel-safe region replace — malformed markers raise, never write), `synthesize_topic.py` (rank/budget → gemma → deterministic post-pass: multi-source `(src: Bn)` verification, out-of-range demotion to Inferences, unknown-wikilink stripping, code-derived confidence, atomic write). Registered `synthesize` in the control panel.
+- Live-run fixes (each with a failing-first regression test): dropped `response_format=json_object` (LM Studio 400s — accepts only `json_schema`/`text`); multi-source citation parsing in both the verification regex and sentence splitter (single-source-only was emptying every section); contradiction callout `>`-prefixing; `sys.path` bootstrap on both CLIs for direct control-panel invocation.
+- `dedup_notes.py` `--body-only` mode compares `_strip_frontmatter` bodies; `_append_deletion_manifest` now migrates the legacy bare-list manifest to the `{"deleted": [...]}` schema in place.
+- Model: `google/gemma-4-e4b` via LM Studio validated as the synthesis baseline (no cloud escalation needed). Run synthesis with `LMSTUDIO_CTX` set to the model's loaded context to reduce source trimming.
+
+---
+
 ## [0.9.0] — 2026-05-29
 
 ### What's new

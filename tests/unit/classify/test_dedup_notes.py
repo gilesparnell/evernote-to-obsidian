@@ -14,12 +14,82 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from scripts.classify.classify_vault import (
+    _MANIFEST_FILENAME,
+    _append_deletion_manifest,
+)
 from scripts.classify.dedup_notes import dedup_vault, find_duplicate_copies
+
+
+class TestDeletionManifestLegacyFormat:
+    """A manifest written by an older run is a bare JSON list; the current
+
+    writer expects {"deleted": [...]}. Appending must migrate the legacy list
+    in place, preserving old entries, not crash (regression: 2026-07-10 dedup).
+    """
+
+    def test_append_to_legacy_list_manifest_migrates_and_preserves(
+        self, tmp_path: Path
+    ) -> None:
+        legacy = [{"path": "old.md", "run_id": "r0", "body_preview": "old"}]
+        (tmp_path / _MANIFEST_FILENAME).write_text(json.dumps(legacy), encoding="utf-8")
+
+        _append_deletion_manifest(tmp_path, "r1", tmp_path / "new.md", "new body")
+
+        data = json.loads((tmp_path / _MANIFEST_FILENAME).read_text(encoding="utf-8"))
+        assert isinstance(data, dict)
+        paths = [e["path"] for e in data["deleted"]]
+        assert "old.md" in paths  # legacy entry preserved
+        assert "new.md" in paths  # new entry appended
 
 
 def _write(path: Path, body: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body, encoding="utf-8")
+
+
+class TestBodyOnlyDedup:
+    """--body-only mode: a numbered copy is a duplicate when its BODY matches the
+
+    base after frontmatter is stripped. Yarle copies whose classifier
+    frontmatter (people/tags/type) diverged but whose body is identical are the
+    target — the byte-exact default misses them.
+    """
+
+    def _pair(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path / "Note.md",
+            "---\ntype: personal\npeople: [Julie]\ntags: []\n---\n\nshared body\n",
+        )
+        _write(
+            tmp_path / "Note.1.md",
+            "---\ntype: note\npeople: [Jem]\ntags: [polished]\n---\n\nshared body\n",
+        )
+
+    def test_frontmatter_diverged_copy_flagged_only_in_body_mode(self, tmp_path: Path) -> None:
+        self._pair(tmp_path)
+        # byte-exact default: bodies differ by frontmatter → not a duplicate
+        assert find_duplicate_copies(tmp_path) == []
+        # body-only: same body → flagged, base kept
+        pairs = find_duplicate_copies(tmp_path, body_only=True)
+        assert pairs == [(tmp_path / "Note.1.md", tmp_path / "Note.md")]
+
+    def test_body_mode_ignores_genuinely_different_bodies(self, tmp_path: Path) -> None:
+        _write(tmp_path / "Note.md", "---\ntype: a\n---\n\nbody one\n")
+        _write(tmp_path / "Note.1.md", "---\ntype: b\n---\n\nbody two DIFFERENT\n")
+        assert find_duplicate_copies(tmp_path, body_only=True) == []
+
+    def test_body_mode_orphan_without_base_not_flagged(self, tmp_path: Path) -> None:
+        _write(tmp_path / "Note.1.md", "---\ntype: a\n---\n\norphan body\n")
+        assert find_duplicate_copies(tmp_path, body_only=True) == []
+
+    def test_body_mode_confirm_trashes_copy_keeps_base(self, tmp_path: Path) -> None:
+        self._pair(tmp_path)
+        trash = tmp_path / "trash"
+        summary = dedup_vault(tmp_path, confirm=True, trash_root=trash, body_only=True)
+        assert summary["deleted"] == 1
+        assert not (tmp_path / "Note.1.md").exists()
+        assert (tmp_path / "Note.md").exists()
 
 
 class TestFindDuplicateCopies:

@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: Lint · Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      # Create the project venv at the path the registry + CLI tests expect
+      # (scripts/classify/venv). Some tests spawn scripts/classify/venv/bin/python
+      # directly, so the venv must exist at that exact location — matching local.
+      - name: Create project venv + install deps
+        run: |
+          python -m venv scripts/classify/venv
+          scripts/classify/venv/bin/pip install --upgrade pip
+          scripts/classify/venv/bin/pip install -r scripts/classify/requirements.txt
+
+      # Unit and integration suites run as separate invocations: some unit tests
+      # leave global state that pollutes the integration classifier tests when
+      # they share a process. Isolating them keeps both green (tracked follow-up:
+      # fix the underlying leak). Live tests (integration_live) are skipped via
+      # pyproject addopts.
+      - name: Unit tests
+        run: scripts/classify/venv/bin/python -m pytest tests/unit -q
+
+      - name: Integration tests
+        run: scripts/classify/venv/bin/python -m pytest tests/integration -q

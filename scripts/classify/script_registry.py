@@ -140,6 +140,19 @@ SCRIPTS: list[dict[str, Any]] = [
         ],
     },
     {
+        "key": "synthesize",
+        "name": "Synthesize topic pages",
+        "use_case": "Generate or refresh Obsidian wiki topic pages from the collector cache.",
+        "tier": "daily",
+        "interpreter": str(_VENV_PY),
+        "cwd": str(_REPO_ROOT),
+        "argv": [
+            "scripts/classify/synthesize_topic.py",
+            "--vault", str(_PERSONAL_VAULT),
+            "--all",
+        ],
+    },
+    {
         "key": "migrate-dry",
         "name": "Migrate to Business vault (dry-run)",
         "use_case": "Preview splitting work-context notes into the Business vault — counts only, no moves.",
@@ -241,7 +254,10 @@ def validate_registry(entries: list[dict[str, Any]]) -> None:
             continue
 
         script = Path(e["cwd"]) / e["argv"][0]
-        if not script.exists():
+        # Only require scripts that live INSIDE this repo. External integrations
+        # (e.g. the granolaSync sibling) are environment-dependent — their
+        # absence must not crash import/CI; a missing one surfaces at run time.
+        if script.is_relative_to(_REPO_ROOT) and not script.exists():
             raise ValueError(f"{key}: script not found at {script}")
 
 
