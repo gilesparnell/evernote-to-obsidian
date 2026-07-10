@@ -150,6 +150,45 @@ class TestCollectTopicMatching:
         assert all(source["path"] != "Random garden.md" for source in data["sources"])
 
 
+class TestCollectTopicExclude:
+    def test_excluded_notes_are_skipped_even_when_alias_matches(
+        self, tmp_path: Path
+    ) -> None:
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        (vault / "Keep Me.md").write_text("Julie finances kept.\n", encoding="utf-8")
+        (vault / "Circuit Breakers_ Module 2.md").write_text(
+            "Julie finances but course scaffolding.\n", encoding="utf-8"
+        )
+        topic = Topic(
+            slug="julies-finances",
+            aliases=["Julie finances"],
+            status="active",
+            path=vault / "wiki" / "topics" / "julies-finances.md",
+            exclude=["Circuit Breakers_*"],
+        )
+
+        data = _collect(vault, topic, tmp_path)
+        paths = {s["path"] for s in data["sources"]}
+
+        assert "Keep Me.md" in paths
+        assert "Circuit Breakers_ Module 2.md" not in paths
+
+    def test_exclude_matches_on_folder_path(self, tmp_path: Path) -> None:
+        vault = tmp_path / "vault"
+        (vault / "Evernote").mkdir(parents=True)
+        (vault / "Evernote" / "Old.md").write_text("Julie finances old.\n", encoding="utf-8")
+        (vault / "New.md").write_text("Julie finances new.\n", encoding="utf-8")
+        topic = Topic(
+            slug="julies-finances", aliases=["Julie finances"], status="active",
+            path=vault / "wiki" / "topics" / "julies-finances.md",
+            exclude=["Evernote/*"],
+        )
+
+        paths = {s["path"] for s in _collect(vault, topic, tmp_path)["sources"]}
+        assert paths == {"New.md"}
+
+
 class TestCollectTopicDedup:
     def test_body_identical_notes_collapse_to_one_source_preferring_base(
         self, tmp_path: Path
