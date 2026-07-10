@@ -49,3 +49,6 @@ tmp/
 # ─── Generated review queues from classifier runs ───────────
 classification-review.md
 .classify_checkpoint.json
+
+# Collector machine-layer cache (never committed)
+scripts/classify/.topic_cache/
