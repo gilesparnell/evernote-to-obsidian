@@ -127,16 +127,21 @@ def rename_orphans(vault: Path, confirm: bool = False) -> dict[str, Any]:
     skipped_collision: list[Path] = []
     link_files_changed: list[Path] = []
     links_rewritten = 0
+    # Track base names a rename would claim THIS run, so the dry-run predicts
+    # multi-orphan collisions (two orphans → same base) exactly as confirm does,
+    # even though no file is created in dry-run mode.
+    claimed: set[Path] = set()
 
     for md_path in candidates:
         target = _base_path_for(md_path)
         if target is None:
             continue
-        # target.exists() here means a PRIOR rename this run already claimed the
-        # base name (two orphans → same base) — skip the loser, never clobber.
-        if target.exists():
+        # Collision if a prior rename this run already claimed the base — checked
+        # via the simulated `claimed` set (works in dry-run) AND the filesystem.
+        if target in claimed or target.exists():
             skipped_collision.append(md_path)
             continue
+        claimed.add(target)
 
         old_stem = md_path.with_suffix("").name
         new_stem = target.with_suffix("").name
@@ -145,12 +150,12 @@ def rename_orphans(vault: Path, confirm: bool = False) -> dict[str, Any]:
         )
         link_files_changed.extend(rewrite_summary["files_changed"])
         links_rewritten += rewrite_summary["links_rewritten"]
+        renamed.append((md_path, target))  # the plan (both modes)
         if confirm:
             md_path.rename(target)
-            renamed.append((md_path, target))
 
     return {
-        "orphans_found": len(candidates) - len(skipped_collision),
+        "orphans_found": len(candidates),
         "renamed": len(renamed),
         "confirmed": confirm,
         "renames": renamed,

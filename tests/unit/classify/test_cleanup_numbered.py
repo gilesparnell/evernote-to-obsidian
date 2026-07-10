@@ -45,7 +45,9 @@ def test_orphan_rename_dry_run_changes_no_files(tmp_path: Path) -> None:
 
     summary = rename_orphans(tmp_path, confirm=False)
 
-    assert summary["renamed"] == 0
+    # dry-run reports the PLAN (1 would-rename) but touches nothing on disc
+    assert summary["renamed"] == 1
+    assert summary["confirmed"] is False
     assert (tmp_path / "Title.1.md").exists()
     assert not (tmp_path / "Title.md").exists()
     assert (tmp_path / "Links.md").read_text(encoding="utf-8") == (
@@ -117,6 +119,24 @@ def test_orphan_rename_multi_orphan_collision_skips_second(tmp_path: Path) -> No
     # the loser keeps its numbered name, nothing clobbered
     survivors = {p.name for p in tmp_path.glob("Title*.md")}
     assert "Title.md" in survivors and len(survivors) == 2
+
+
+def test_dry_run_predicts_multi_orphan_collisions_accurately(tmp_path: Path) -> None:
+    # Two orphans → same base. The dry-run must predict renamed=1, collision=1
+    # (simulating the sequential claim), NOT report 0 renames / 0 collisions —
+    # and must change nothing on disc.
+    _write(tmp_path / "Title.1.md", "orphan one\n")
+    _write(tmp_path / "Title.2.md", "orphan two DIFFERENT\n")
+
+    summary = rename_orphans(tmp_path, confirm=False)
+
+    assert summary["orphans_found"] == 2
+    assert summary["renamed"] == 1
+    assert len(summary["skipped_collision"]) == 1
+    # nothing actually renamed in dry-run
+    assert not (tmp_path / "Title.md").exists()
+    assert (tmp_path / "Title.1.md").exists()
+    assert (tmp_path / "Title.2.md").exists()
 
 
 def test_near_dup_delete_confirm_trashes_only_near_dups(tmp_path: Path) -> None:
