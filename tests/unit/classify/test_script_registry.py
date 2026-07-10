@@ -51,6 +51,12 @@ class TestRegistryShape:
         for e in reg.SCRIPTS:
             if e["tier"] == "link":
                 continue
+            # External integrations (e.g. granolaSync) carry their own
+            # environment-specific interpreter; skip those — see
+            # TestExternalScriptTolerance.
+            script = Path(e["cwd"]) / e["argv"][0]
+            if not script.is_relative_to(reg._REPO_ROOT):
+                continue
             assert Path(e["interpreter"]).exists(), (
                 f"{e['key']}: interpreter not found at {e['interpreter']}"
             )
