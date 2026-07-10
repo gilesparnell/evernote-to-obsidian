@@ -34,12 +34,16 @@ class TestRegistryShape:
             assert e["tier"] in allowed, f"{e['key']} has bad tier {e['tier']}"
 
     def test_runnable_entries_point_at_existing_scripts(self):
-        # argv[0] resolved against cwd must be a real file on disc.
+        # In-repo argv[0] resolved against cwd must be a real file. External
+        # integrations (e.g. granolaSync) are environment-dependent and skipped
+        # (see TestExternalScriptTolerance).
         from pathlib import Path
         for e in reg.SCRIPTS:
             if e["tier"] == "link":
                 continue
             script = Path(e["cwd"]) / e["argv"][0]
+            if not script.is_relative_to(reg._REPO_ROOT):
+                continue
             assert script.exists(), f"{e['key']}: script not found at {script}"
 
     def test_runnable_entries_have_existing_interpreter(self):

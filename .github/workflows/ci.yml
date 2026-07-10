@@ -17,8 +17,14 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Install dependencies
-        run: pip install -r scripts/classify/requirements.txt
+      # Create the project venv at the path the registry + CLI tests expect
+      # (scripts/classify/venv). Some tests spawn scripts/classify/venv/bin/python
+      # directly, so the venv must exist at that exact location — matching local.
+      - name: Create project venv + install deps
+        run: |
+          python -m venv scripts/classify/venv
+          scripts/classify/venv/bin/pip install --upgrade pip
+          scripts/classify/venv/bin/pip install -r scripts/classify/requirements.txt
 
       # Unit and integration suites run as separate invocations: some unit tests
       # leave global state that pollutes the integration classifier tests when
@@ -26,7 +32,7 @@ jobs:
       # fix the underlying leak). Live tests (integration_live) are skipped via
       # pyproject addopts.
       - name: Unit tests
-        run: python -m pytest tests/unit -q
+        run: scripts/classify/venv/bin/python -m pytest tests/unit -q
 
       - name: Integration tests
-        run: python -m pytest tests/integration -q
+        run: scripts/classify/venv/bin/python -m pytest tests/integration -q
