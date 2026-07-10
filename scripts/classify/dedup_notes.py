@@ -59,26 +59,36 @@ def _base_path_for(path: Path) -> Path | None:
     return path.with_name(_NUMBERED_SUFFIX_RE.sub(".md", path.name))
 
 
-def is_exact_duplicate_copy(path: Path) -> Path | None:
-    """Return the base path if ``path`` is a numbered copy byte-identical to
-    an existing base ``Title.md``; otherwise None."""
+def _body_of(path: Path) -> str:
+    return _strip_frontmatter(path.read_text(encoding="utf-8")).strip()
+
+
+def is_exact_duplicate_copy(path: Path, *, body_only: bool = False) -> Path | None:
+    """Return the base path if ``path`` is a numbered copy duplicating an
+    existing base ``Title.md``; otherwise None.
+
+    Default: byte-for-byte identity. With ``body_only=True``: identical BODY
+    after frontmatter is stripped — catches Yarle copies whose classifier
+    frontmatter (people/tags/type) diverged but whose content is the same."""
     base = _base_path_for(path)
     if base is None or not base.exists():
         return None
+    if body_only:
+        return base if _body_of(path) == _body_of(base) else None
     if filecmp.cmp(path, base, shallow=False):
         return base
     return None
 
 
 def find_duplicate_copies(
-    vault: Path, folder: str | None = None
+    vault: Path, folder: str | None = None, *, body_only: bool = False
 ) -> list[tuple[Path, Path]]:
     """Walk the vault (reusing the classifier's skip-list) and return
-    ``(duplicate_copy, base)`` pairs for every numbered copy that is
-    byte-identical to its base."""
+    ``(duplicate_copy, base)`` pairs for every numbered copy that duplicates
+    its base (byte-identical, or body-identical when ``body_only``)."""
     pairs: list[tuple[Path, Path]] = []
     for md_path in _iter_md_files(vault, folder):
-        base = is_exact_duplicate_copy(md_path)
+        base = is_exact_duplicate_copy(md_path, body_only=body_only)
         if base is not None:
             pairs.append((md_path, base))
     return pairs
@@ -102,12 +112,14 @@ def dedup_vault(
     folder: str | None = None,
     confirm: bool = False,
     trash_root: Path | None = None,
+    *,
+    body_only: bool = False,
 ) -> dict[str, object]:
-    """Find exact-duplicate numbered copies. With ``confirm=True``, move each
-    to the trash and log it to the deletion manifest; otherwise just report.
-    Returns a summary dict."""
+    """Find duplicate numbered copies. With ``confirm=True``, move each to the
+    trash and log it to the deletion manifest; otherwise just report. Returns a
+    summary dict. ``body_only`` matches on stripped body rather than bytes."""
     trash_root = trash_root or (Path.home() / ".Trash")
-    pairs = find_duplicate_copies(vault, folder)
+    pairs = find_duplicate_copies(vault, folder, body_only=body_only)
 
     deleted = 0
     if confirm and pairs:
@@ -169,10 +181,17 @@ def main() -> None:
         help="Actually remove the duplicate copies. Without this flag the "
              "tool only previews (no files touched).",
     )
+    parser.add_argument(
+        "--body-only", action="store_true", dest="body_only",
+        help="Match on note BODY (frontmatter stripped) rather than byte-exact. "
+             "Removes Yarle copies whose classifier frontmatter diverged but "
+             "whose content is identical. Base is always kept.",
+    )
     args = parser.parse_args()
 
     summary = dedup_vault(
         vault=args.vault, folder=args.folder, confirm=args.confirm,
+        body_only=args.body_only,
     )
     if args.confirm:
         print(

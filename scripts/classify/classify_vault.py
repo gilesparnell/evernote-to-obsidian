@@ -352,6 +352,13 @@ def _append_deletion_manifest(
     else:
         data = {"deleted": []}
 
+    # Legacy manifests were a bare JSON list; migrate to the {"deleted": [...]}
+    # schema in place, preserving the old entries.
+    if isinstance(data, list):
+        data = {"deleted": data}
+    elif not isinstance(data, dict) or not isinstance(data.get("deleted"), list):
+        data = {"deleted": []}
+
     try:
         rel_path = str(md_path.relative_to(vault))
     except ValueError:
