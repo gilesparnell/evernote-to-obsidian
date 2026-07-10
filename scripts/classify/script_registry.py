@@ -254,7 +254,10 @@ def validate_registry(entries: list[dict[str, Any]]) -> None:
             continue
 
         script = Path(e["cwd"]) / e["argv"][0]
-        if not script.exists():
+        # Only require scripts that live INSIDE this repo. External integrations
+        # (e.g. the granolaSync sibling) are environment-dependent — their
+        # absence must not crash import/CI; a missing one surfaces at run time.
+        if script.is_relative_to(_REPO_ROOT) and not script.exists():
             raise ValueError(f"{key}: script not found at {script}")
 
 

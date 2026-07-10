@@ -76,11 +76,13 @@ class TestValidateRegistry:
             reg.validate_registry(bad)
 
     def test_raises_when_runnable_script_missing(self, tmp_path):
+        # In-repo missing script must raise (external ones are tolerated — see
+        # TestExternalScriptTolerance). Use the repo root as cwd.
         bad = [{
             "key": "x", "name": "X", "use_case": "u", "tier": "daily",
             "interpreter": "/usr/bin/python3",
-            "cwd": str(tmp_path),
-            "argv": ["does_not_exist.py"],
+            "cwd": str(reg._REPO_ROOT),
+            "argv": ["scripts/classify/does_not_exist.py"],
         }]
         with pytest.raises(ValueError, match="not found|missing"):
             reg.validate_registry(bad)
@@ -128,3 +130,26 @@ class TestByTier:
     def test_lookup_unknown_key_raises(self):
         with pytest.raises(KeyError):
             reg.get("no-such-key")
+
+
+class TestExternalScriptTolerance:
+    """Scripts outside the repo (e.g. the granolaSync sibling) are environment-
+
+    dependent — the registry can't guarantee they exist, so their absence must
+    NOT crash the import-time validation. In-repo scripts are still required.
+    """
+
+    def _entry(self, cwd: str, script: str) -> dict:
+        return {
+            "key": "probe", "name": "Probe", "use_case": "test", "tier": "daily",
+            "interpreter": "python", "cwd": cwd, "argv": [script],
+        }
+
+    def test_missing_external_script_does_not_raise(self):
+        entry = self._entry("/definitely/not/a/repo/path", "ghost.py")
+        reg.validate_registry([entry])  # must not raise
+
+    def test_missing_in_repo_script_still_raises(self):
+        entry = self._entry(str(reg._REPO_ROOT), "scripts/classify/does_not_exist.py")
+        with pytest.raises(ValueError, match="script not found"):
+            reg.validate_registry([entry])
