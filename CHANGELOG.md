@@ -13,6 +13,16 @@ Each entry is split into:
 
 ---
 
+## [0.12.0] — 2026-07-10
+
+### What's new
+- **Exclude notes from a topic without losing the ones you want.** Sometimes a note genuinely mentions your topic but doesn't belong on the page — like course-material scaffolding cluttering a reflective topic. Until now your only lever was the alias list, which is all-or-nothing. Now a topic can carry an `exclude:` list of filename patterns (e.g. `Circuit Breakers_*` or `Evernote/*`), and the collector skips those notes even when an alias matches them. Add the line to the topic's page, re-run, and the page re-synthesises from the curated set — your own notes in the page are preserved. This is the "see the page, prune it, regenerate" loop: edit `exclude:`, re-run, done.
+
+### Under the hood
+- `Topic` gains an `exclude: list[str]` field (defaults empty); `load_topics` parses + type-checks it. `collect_topic` skips a note when `fnmatch` matches any pattern against either the vault-relative POSIX path or the bare filename, evaluated before alias matching. Changing `exclude` changes the matched source set → new `source_set_hash` → synthesis auto-refreshes without `--force`. 5 tests.
+
+---
+
 ## [0.11.0] — 2026-07-10
 
 ### What's new
