@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.gilesparnell.granola-nightly</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/gilesparnell/Documents/VSStudio/parnell-systems/labs/evernote-to-obsidian/scripts/classify/venv/bin/python</string>
+    <string>/Users/gilesparnell/Documents/VSStudio/parnell-systems/labs/evernote-to-obsidian/scripts/classify/nightly_chain.py</string>
+    <string>--mode</string>
+    <string>nightly</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>LMSTUDIO_CTX</key>
+    <string>16384</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>23</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/gilesparnell/Library/Logs/granola-sync.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/gilesparnell/Library/Logs/granola-sync.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

@@ -153,6 +153,19 @@ SCRIPTS: list[dict[str, Any]] = [
         ],
     },
     {
+        "key": "refresh-topics",
+        "name": "Refresh topic pages",
+        "use_case": "Run the panel chain now: classify both vaults, collect registered topics, refresh changed topic pages, and reconcile source-note topic backlinks.",
+        "tier": "daily",
+        "interpreter": str(_VENV_PY),
+        "cwd": str(_REPO_ROOT),
+        "argv": [
+            "scripts/classify/nightly_chain.py",
+            "--mode", "panel",
+            "--vaults", "both",
+        ],
+    },
+    {
         "key": "migrate-dry",
         "name": "Migrate to Business vault (dry-run)",
         "use_case": "Preview splitting work-context notes into the Business vault — counts only, no moves.",

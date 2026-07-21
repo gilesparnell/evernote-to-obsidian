@@ -1,7 +1,7 @@
 ---
 title: Wiki Schema
 type: schema
-updated: 2026-07-10
+updated: 2026-07-21
 ---
 
 # Wiki conventions
@@ -35,6 +35,19 @@ run. Never invent `[[wikilinks]]`; any link not on the whitelist is stripped.
 
 One canonical slug per topic (lower-case, hyphenated, NFKD-folded — `Julie's`
 → `julies`). Aliases resolve to the slug; two topics may never share an alias.
+
+Topic stubs may also carry `exclude:` patterns. Each entry is matched as a
+glob against both the vault-relative POSIX path and the filename, and it wins
+before alias matching. Use this to keep source material that mentions a topic
+out of that topic page without weakening the alias list.
+
+## Source-note backlinks
+
+Matched source notes may carry a `topics:` frontmatter list such as
+`topics: ["[[julie-finances]]"]`. Entries whose slug is a registered topic are
+managed by the chain: the chain adds missing matches and removes registered
+topics that no longer match. Entries whose slug is not registered are
+hand-written and preserved exactly.
 
 ## Sentinels — machine vs human regions
 

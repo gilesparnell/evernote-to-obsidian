@@ -137,6 +137,18 @@ class TestByTier:
         entry = reg.get("audit-manifest")
         assert entry["key"] == "audit-manifest"
 
+    def test_refresh_topics_runs_panel_chain_for_both_vaults(self):
+        entry = reg.get("refresh-topics")
+        assert entry["name"] == "Refresh topic pages"
+        assert entry["tier"] == "daily"
+        assert entry["interpreter"] == str(reg._VENV_PY)
+        assert entry["cwd"] == str(reg._REPO_ROOT)
+        assert entry["argv"] == [
+            "scripts/classify/nightly_chain.py",
+            "--mode", "panel",
+            "--vaults", "both",
+        ]
+
     def test_lookup_unknown_key_raises(self):
         with pytest.raises(KeyError):
             reg.get("no-such-key")
