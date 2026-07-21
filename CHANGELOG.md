@@ -13,6 +13,18 @@ Each entry is split into:
 
 ---
 
+## [0.13.0] — 2026-07-21
+
+### What's new
+- **Topic pages can refresh themselves overnight and from the panel.** The nightly chain is ready to classify both vaults, refresh changed topic pages, and keep source-note `topics:` backlinks aligned. The control panel also gets a "Refresh topic pages" action for the same classify → collect → synthesise → backlink path when you want the graph updated during the day.
+- **The wiki schema now explains the topic tuning fields.** Topic pages document how `exclude:` trims noisy matches and how source-note `topics:` backlinks are owned, so manual entries stay yours while registered topic links stay current.
+
+### Under the hood
+- Registered `refresh-topics` in `scripts/classify/script_registry.py` with the venv interpreter and `nightly_chain.py --mode panel --vaults both`; registry validation now locks that runnable shape. Added `scripts/classify/launchd/com.gilesparnell.granola-nightly.plist.new` as the T6 staging plist for launchd rollout without touching `~/Library/LaunchAgents`.
+- Bumped the package version in `pyproject.toml` to `0.13.0` and updated `scripts/classify/templates/wiki_SCHEMA.md` with `exclude:` glob semantics plus managed-slug ownership for `topics:` backlinks.
+
+---
+
 ## [0.12.0] — 2026-07-10
 
 ### What's new
