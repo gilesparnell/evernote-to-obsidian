@@ -307,3 +307,77 @@ def test_gardener_runs_even_when_every_other_step_failed(
 
     assert calls == ["classify", "collect", "synthesize", "backlink", "gardener"]
     assert _state(tmp_path / "state")["steps"]["gardener"]["status"] == "ok"
+
+
+class TestLMStudioPreflight:
+    def _stub_steps(self, nightly_chain, monkeypatch) -> None:
+        def ok(context):
+            return nightly_chain.StepResult(status="ok", detail="ok")
+
+        monkeypatch.setattr(
+            nightly_chain,
+            "STEP_SPECS",
+            (nightly_chain.StepSpec("classify", ok),),
+        )
+
+    def test_check_lm_studio_unreachable_reports_unavailable(self, nightly_chain) -> None:
+        status = nightly_chain.check_lm_studio(
+            base_url="http://127.0.0.1:59999/v1", timeout=0.2
+        )
+
+        assert status["available"] is False
+        assert status["base_url"] == "http://127.0.0.1:59999/v1"
+        assert status["reason"]
+        assert status["models"] == []
+
+    def test_check_lm_studio_reachable_reports_models(self, nightly_chain, monkeypatch) -> None:
+        import io
+
+        def fake_urlopen(url, timeout=0):
+            assert url.endswith("/models")
+            return io.BytesIO(b'{"data": [{"id": "google/gemma-4-e4b"}]}')
+
+        monkeypatch.setattr(nightly_chain, "_urlopen", fake_urlopen)
+
+        status = nightly_chain.check_lm_studio(timeout=0.2)
+
+        assert status["available"] is True
+        assert status["reason"] is None
+        assert status["models"] == ["google/gemma-4-e4b"]
+
+    def test_chain_warns_and_stamps_state_when_lm_unavailable(
+        self, nightly_chain, tmp_path: Path, vaults: tuple[Path, Path], monkeypatch, capsys
+    ) -> None:
+        self._stub_steps(nightly_chain, monkeypatch)
+
+        def refuse(url, timeout=0):
+            raise ConnectionRefusedError("connection refused")
+
+        monkeypatch.setattr(nightly_chain, "_urlopen", refuse)
+
+        assert _run_cli(nightly_chain, tmp_path, vaults, "--mode", "nightly") == 0
+
+        state = _state(tmp_path / "state")
+        assert state["lm_studio"]["available"] is False
+        out = capsys.readouterr().out
+        assert "LM Studio not reachable" in out
+        assert "rules-only" in out
+        assert state["complete"] is True  # graceful degradation preserved
+
+    def test_chain_silent_and_stamps_state_when_lm_available(
+        self, nightly_chain, tmp_path: Path, vaults: tuple[Path, Path], monkeypatch, capsys
+    ) -> None:
+        import io
+
+        self._stub_steps(nightly_chain, monkeypatch)
+        monkeypatch.setattr(
+            nightly_chain,
+            "_urlopen",
+            lambda url, timeout=0: io.BytesIO(b'{"data": [{"id": "google/gemma-4-e4b"}]}'),
+        )
+
+        assert _run_cli(nightly_chain, tmp_path, vaults, "--mode", "panel") == 0
+
+        state = _state(tmp_path / "state")
+        assert state["lm_studio"]["available"] is True
+        assert "LM Studio not reachable" not in capsys.readouterr().out

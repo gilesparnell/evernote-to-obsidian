@@ -252,3 +252,25 @@ class TestGardenerWriting:
         gardener.write_report(vault=vault, report_md="Would write.\n", dry_run=True)
 
         assert _snapshot_tree(vault) == before
+
+
+class TestLMStudioRow:
+    def test_lm_studio_row_renders_all_three_states(
+        self, gardener, vault: Path, tmp_path: Path
+    ) -> None:
+        missing = gardener.build_report(vaults=[vault], run_state={}, json_out=tmp_path)
+        assert "| LM Studio | n/a |" in missing
+
+        down = gardener.build_report(
+            vaults=[vault],
+            run_state={"lm_studio": {"available": False, "reason": "connection refused"}},
+            json_out=tmp_path,
+        )
+        assert "| LM Studio | NOT AVAILABLE — connection refused |" in down
+
+        up = gardener.build_report(
+            vaults=[vault],
+            run_state={"lm_studio": {"available": True, "models": ["google/gemma-4-e4b"]}},
+            json_out=tmp_path,
+        )
+        assert "| LM Studio | available (google/gemma-4-e4b) |" in up

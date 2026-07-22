@@ -52,3 +52,4 @@ classification-review.md
 
 # Collector machine-layer cache (never committed)
 scripts/classify/.topic_cache/
+scripts/classify/.chain_state/

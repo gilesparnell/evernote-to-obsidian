@@ -89,6 +89,7 @@ def build_report(*, vaults: list[Path], run_state: dict, json_out: Path) -> str:
         f"| Started | {_display(run_state.get('started_at'))} |",
         f"| Mode | {_display(run_state.get('mode'))} |",
         f"| Complete | {_display_bool(run_state.get('complete'))} |",
+        f"| LM Studio | {_display_lm_studio(run_state.get('lm_studio'))} |",
         "",
         "| Step | Status | Detail |",
         "|---|---|---|",
@@ -264,6 +265,16 @@ def _read_json(path: Path) -> dict[str, Any]:
 def _source_count(data: dict[str, Any]) -> int | None:
     sources = data.get("sources")
     return len(sources) if isinstance(sources, list) else None
+
+
+def _display_lm_studio(status: object) -> str:
+    if not isinstance(status, dict):
+        return "n/a"
+    if status.get("available") is True:
+        models = ", ".join(status.get("models") or []) or "no models listed"
+        return f"available ({models})"
+    reason = status.get("reason") or "unknown reason"
+    return f"NOT AVAILABLE — {reason}"
 
 
 def _run_step_rows(run_state: dict) -> list[str]:

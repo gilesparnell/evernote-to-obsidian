@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.request
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +20,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.classify.classify_vault import classify_vault
+from scripts.classify.lm_classifier import LM_STUDIO_BASE_URL
 from scripts.classify.collect_topic import collect_topic
 from scripts.classify.gardener import build_report, write_report
 from scripts.classify.synthesize_topic import SynthesisResult, synthesize_topic
@@ -35,6 +37,32 @@ _LOCK_NAME = "nightly_chain.lock"
 _EXPORT_TIMEOUT_SECONDS = 900
 _PANEL_STEPS = ("classify", "collect", "synthesize", "backlink")
 _TRANSIENT_NEEDLES = ("connection", "timeout", "timed out", "unreachable", "refused")
+_LM_CHECK_TIMEOUT_SECONDS = 3.0
+
+# Module-level indirection so tests can fake the HTTP layer without sockets.
+_urlopen = urllib.request.urlopen
+
+
+def check_lm_studio(
+    *, base_url: str = LM_STUDIO_BASE_URL, timeout: float = _LM_CHECK_TIMEOUT_SECONDS
+) -> dict[str, Any]:
+    """Preflight the LM Studio server; never raises.
+
+    The chain runs to completion either way (rules-only classification,
+    degraded synthesis) — this exists so the degradation is loud instead
+    of silent.
+    """
+    try:
+        payload = json.load(_urlopen(f"{base_url.rstrip('/')}/models", timeout=timeout))
+        models = [entry.get("id", "?") for entry in payload.get("data", [])]
+        return {"available": True, "base_url": base_url, "reason": None, "models": models}
+    except Exception as exc:
+        return {
+            "available": False,
+            "base_url": base_url,
+            "reason": str(exc) or exc.__class__.__name__,
+            "models": [],
+        }
 
 
 @dataclass(frozen=True)
@@ -210,13 +238,21 @@ def run_chain(*, context: RunContext, step_names: list[str] | None = None) -> in
         print("nightly_chain already running; exiting without work.")
         return 0
 
+    lm_status = check_lm_studio()
     run_state = {
         "started_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "mode": context.mode,
         "complete": False,
+        "lm_studio": lm_status,
         "steps": {},
     }
     _write_run_state(context.state_dir, run_state)
+    if not lm_status["available"]:
+        print(
+            f"⚠ LM Studio not reachable at {lm_status['base_url']} — "
+            f"classification will be rules-only and topic synthesis will be "
+            f"degraded or skipped ({lm_status['reason']})"
+        )
 
     try:
         for spec in _steps_for_run(mode=context.mode, requested=step_names):
