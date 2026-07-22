@@ -87,14 +87,20 @@ class TestTopicBacklinksManagedEntries:
     ) -> None:
         note = vault / "Hand linked note.md"
         before = note.read_bytes()
-        expected_entry = b'  - "[[not-a-registered-topic]]"'
 
         _run(reconcile_backlinks, vault, topics, tmp_path)
 
-        after = note.read_bytes()
-        assert expected_entry in before
-        assert expected_entry in after
-        assert b"not-a-registered-topic" in after
+        # The hand-written entry's VALUE must survive the rewrite exactly
+        # (the topics list itself is re-serialised in the vault's canonical
+        # plain style when a managed entry is added alongside it).
+        import yaml as _yaml
+
+        assert b"[[not-a-registered-topic]]" in before
+        after_text = note.read_text(encoding="utf-8")
+        fm = _yaml.safe_load(after_text.split("---")[1])
+        assert "[[not-a-registered-topic]]" in fm["topics"]
+        # And no forced double-quoting anywhere in the frontmatter.
+        assert '"[[' not in after_text
 
     def test_stale_and_excluded_managed_entries_are_removed(
         self,
@@ -215,3 +221,42 @@ class TestTopicBacklinksFailuresAndSkips:
         _run(reconcile_backlinks, vault, topics, tmp_path)
 
         assert note.read_bytes() == before
+
+
+class TestFrontmatterStylePreservation:
+    def test_untouched_keys_stay_unquoted_and_byte_identical(
+        self, tmp_path: Path
+    ) -> None:
+        import re
+        import shutil
+
+        from scripts.classify.topic_backlinks import reconcile_backlinks
+        from scripts.classify.topics import load_topics
+
+        fixture = Path(__file__).parents[2] / "fixtures" / "chain"
+        vault = tmp_path / "Vault"
+        shutil.copytree(fixture, vault)
+        note = vault / "Julie finances title match.md"
+        before_lines = note.read_text(encoding="utf-8").splitlines()
+
+        reconcile_backlinks(
+            vault=vault,
+            topics=load_topics(vault),
+            json_out=tmp_path / "cache",
+        )
+
+        after = note.read_text(encoding="utf-8")
+        after_lines = after.splitlines()
+        # No frontmatter key may be re-serialised in quoted style.
+        fm_end = after_lines[1:].index("---") + 1
+        for line in after_lines[1:fm_end]:
+            assert not line.startswith('"'), f"quoted key introduced: {line!r}"
+        # Every original frontmatter line except topics-related ones survives verbatim.
+        topics_re = re.compile(r"^(topics:|- )")
+        original_fm = [l for l in before_lines[1 : before_lines[1:].index("---") + 1]
+                      if not topics_re.match(l)]
+        for line in original_fm:
+            assert line in after_lines, f"frontmatter line churned: {line!r}"
+        # The backlink itself landed and parses back to the same wikilink.
+        assert "topics:" in after
+        assert "[[julie-finances]]" in after

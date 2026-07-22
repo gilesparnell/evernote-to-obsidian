@@ -1,5 +1,5 @@
 ---
-title: "Household paperwork"
+title: Household paperwork
 type: note
 ---
 

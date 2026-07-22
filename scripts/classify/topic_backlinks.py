@@ -31,15 +31,16 @@ _WRITE_SLEEP_SECONDS = 0.05
 
 
 class _FrontmatterDumper(yaml.SafeDumper):
+    """Match `frontmatter.write_frontmatter`'s plain style exactly.
+
+    No forced quoting: PyYAML already quotes only where YAML requires it
+    (e.g. `'[[slug]]'` wikilinks, which would otherwise parse as nested
+    flow sequences). A previous forced `style='"'` representer re-quoted
+    every key and value, churning untouched frontmatter across the vault.
+    """
+
     def increase_indent(self, flow: bool = False, indentless: bool = False):
         return super().increase_indent(flow, False)
-
-
-def _represent_string(dumper: yaml.Dumper, value: str) -> yaml.ScalarNode:
-    return dumper.represent_scalar("tag:yaml.org,2002:str", value, style='"')
-
-
-_FrontmatterDumper.add_representer(str, _represent_string)
 
 
 @dataclass(frozen=True)
@@ -223,7 +224,7 @@ def _write_frontmatter(
             frontmatter,
             Dumper=_FrontmatterDumper,
             sort_keys=False,
-            default_flow_style=False,
+            default_flow_style=None,
             allow_unicode=True,
         )
         if not body.startswith("\n"):

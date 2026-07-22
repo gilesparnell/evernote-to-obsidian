@@ -390,6 +390,7 @@ def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
     checkpoint_interval: int = DEFAULT_CHECKPOINT_INTERVAL,
     html_out: bool = False,
     log_notes: bool = False,
+    purge_enabled: bool = True,
 ) -> dict[str, Any]:
     """Run classification across the vault. Returns a summary dict.
 
@@ -472,6 +473,21 @@ def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
             # because the clipping rule returns conf 0.85 → auto-classify
             # instead of hitting this purge gate.
             if rules_classifier.should_purge_by_body_shape(body):
+                # Unattended runs (nightly chain) must never delete notes —
+                # locked invariant R6. Purge stays operator-only; the chain
+                # routes candidates to the review queue instead.
+                if not purge_enabled:
+                    review_queue.append(
+                        {
+                            "path": md_path,
+                            "proposed_type": "?",
+                            "proposed_org": "?",
+                            "confidence": 0.0,
+                            "reason": "purge-candidate (unattended run — not deleted)",
+                        }
+                    )
+                    pbar.update(1)
+                    continue
                 if not dry_run:
                     _append_deletion_manifest(vault, run_id, md_path, body)
                     md_path.unlink()
