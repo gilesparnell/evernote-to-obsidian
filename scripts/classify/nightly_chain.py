@@ -109,7 +109,9 @@ def _step_export(context: RunContext) -> StepResult:
 def _step_classify(context: RunContext) -> StepResult:
     parts: list[str] = []
     for vault in context.vaults:
-        summary = classify_vault(vault=vault, dry_run=context.dry_run)
+        summary = classify_vault(
+            vault=vault, dry_run=context.dry_run, purge_enabled=False
+        )
         parts.append(
             f"{vault.name}: {summary.get('auto_classified', 0)} new / "
             f"{summary.get('needs_review', 0)} review"
