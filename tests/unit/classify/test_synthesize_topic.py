@@ -519,6 +519,17 @@ def test_missing_cache_auto_runs_collector(tmp_path: Path, monkeypatch) -> None:
 def test_real_write_updates_log_and_index(tmp_path: Path, monkeypatch) -> None:
     vault = tmp_path / "vault"
     _write_topic(vault)
+    wiki = vault / "wiki"
+    (wiki / "index.md").write_text(
+        "# Wiki\n"
+        "\n"
+        "## Topics\n"
+        "\n"
+        "## Journal\n"
+        "- [[julies-finances]] — Old stray summary\n"
+        "- [[today]]\n",
+        encoding="utf-8",
+    )
     _write_source(vault, "source-one.md", "Julie finances has one sourced quote.")
     cache_dir = tmp_path / "cache"
     _write_cache(cache_dir, vault)
@@ -532,9 +543,15 @@ def test_real_write_updates_log_and_index(tmp_path: Path, monkeypatch) -> None:
     )
 
     assert "julies-finances" in (vault / "wiki" / "log.md").read_text(encoding="utf-8")
-    assert "- [[julies-finances]] — Index summary line." in (
-        vault / "wiki" / "index.md"
-    ).read_text(encoding="utf-8")
+    assert (wiki / "index.md").read_text(encoding="utf-8") == (
+        "# Wiki\n"
+        "\n"
+        "## Topics\n"
+        "- [[julies-finances]] — Index summary line.\n"
+        "\n"
+        "## Journal\n"
+        "- [[today]]\n"
+    )
 
 
 def test_cli_dry_run_prints_summary_without_writes(
