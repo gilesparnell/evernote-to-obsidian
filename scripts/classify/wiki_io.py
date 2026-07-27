@@ -53,11 +53,30 @@ def append_log(vault: Path, entry: str) -> None:
     _atomic_write(path, f"{existing}{line}")
 
 
-def upsert_index_line(vault: Path, slug: str, summary_line: str) -> None:
+def upsert_index_line(
+    vault: Path,
+    slug: str,
+    summary_line: str,
+    *,
+    section: str | None = None,
+) -> None:
     path = vault / "wiki" / "index.md"
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     target = f"- [[{slug}]]"
     replacement = f"{target} — {summary_line}"
+
+    if section is not None:
+        _atomic_write(
+            path,
+            _upsert_index_line_in_section(
+                existing=existing,
+                target=target,
+                replacement=replacement,
+                section=section,
+            ),
+        )
+        return
+
     lines = existing.splitlines()
 
     for idx, line in enumerate(lines):
@@ -68,6 +87,78 @@ def upsert_index_line(vault: Path, slug: str, summary_line: str) -> None:
         lines.append(replacement)
 
     _atomic_write(path, "\n".join(lines).rstrip() + "\n")
+
+
+def _upsert_index_line_in_section(
+    *,
+    existing: str,
+    target: str,
+    replacement: str,
+    section: str,
+) -> str:
+    lines = existing.splitlines(keepends=True)
+
+    heading_idx = _find_section_heading(lines, section)
+    if heading_idx is None:
+        addition = f"{section}\n{replacement}\n"
+        if not existing:
+            lines = addition.splitlines(keepends=True)
+        else:
+            separator = "\n" if existing.endswith("\n") else "\n\n"
+            lines.extend(f"{separator}{addition}".splitlines(keepends=True))
+        heading_idx = _find_section_heading(lines, section)
+
+    if heading_idx is None:
+        raise ValueError(f"section was not created: {section}")
+
+    section_end = _find_next_h2(lines, heading_idx + 1)
+    lines = [
+        line
+        for idx, line in enumerate(lines)
+        if not (
+            line.startswith(target)
+            and not (heading_idx < idx < section_end)
+        )
+    ]
+
+    heading_idx = _find_section_heading(lines, section)
+    if heading_idx is None:
+        raise ValueError(f"section missing after migration: {section}")
+    section_end = _find_next_h2(lines, heading_idx + 1)
+
+    for idx in range(heading_idx + 1, section_end):
+        if lines[idx].startswith(target):
+            lines[idx] = f"{replacement}{_line_ending(lines[idx])}"
+            break
+    else:
+        insert_at = section_end
+        if insert_at > heading_idx + 1 and lines[insert_at - 1].strip() == "":
+            insert_at -= 1
+        lines.insert(insert_at, f"{replacement}\n")
+
+    return "".join(lines)
+
+
+def _find_section_heading(lines: list[str], section: str) -> int | None:
+    for idx, line in enumerate(lines):
+        if line.rstrip("\r\n") == section:
+            return idx
+    return None
+
+
+def _find_next_h2(lines: list[str], start: int) -> int:
+    for idx in range(start, len(lines)):
+        if lines[idx].startswith("## "):
+            return idx
+    return len(lines)
+
+
+def _line_ending(line: str) -> str:
+    if line.endswith("\r\n"):
+        return "\r\n"
+    if line.endswith("\n"):
+        return "\n"
+    return "\n"
 
 
 def _atomic_write(path: Path, text: str) -> None:

@@ -187,7 +187,7 @@ def _synthesize_from_cache(
     new_text = _merge_frontmatter_and_body(topic.path, fm, generated)
     _atomic_write(topic.path, new_text)
     append_log(vault, f"{topic.slug}: synthesized {len(sources)} sources")
-    upsert_index_line(vault, topic.slug, summary_line)
+    upsert_index_line(vault, topic.slug, summary_line, section="## Topics")
     return SynthesisResult(
         topic.slug,
         "wrote",

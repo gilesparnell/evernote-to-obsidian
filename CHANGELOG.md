@@ -13,6 +13,19 @@ Each entry is split into:
 
 ---
 
+## [0.15.0] — 2026-07-27
+
+### What's new
+- **Home.md is now the front door to each vault.** Both vaults' Home pages carry a nightly-refreshed "Topics & synthesis" section (topic freshness, health score, wiki links, review-queue count), a jump link to the other vault, and a Curated hubs list preserving the hand-built Evernote-era indexes. Your own edits to Home are never touched — the chain only rewrites its marked section.
+- **Every `up:` breadcrumb now lands somewhere.** Eight missing hub pages were created where notes pointed at them (including Meetings in the Personal vault, home to all exported meeting notes) — orphaned breadcrumbs dropped from 61 to 0 in Personal and 1,418 to 1 in Business.
+- **Topic summaries file under their own heading.** The wiki index now keeps topic lines under "## Topics" instead of appending them loose at the bottom.
+
+### Under the hood
+- `scripts/classify/home_dashboard.py` (new): `build_home_section` + sentinel-safe `write_home`, called from `_step_gardener` for every vault; reuses promoted `gardener.topic_freshness`/`review_queue_count`. Links render only when their target file exists in that vault.
+- `scripts/classify/wiki_io.py`: `upsert_index_line` gains opt-in `section=` with same-slug stray-bullet migration (idempotent); `synthesize_topic.py` passes `section="## Topics"`.
+- `scripts/classify/moc_audit.py` (new): dry-run-by-default audit of missing canonical `UP_MAP` MOC targets with incoming-reference counts + frontmatter lint (self-referential/dangling `up:`); `--apply` creates Inbox-archetype stubs atomically, never overwrites, skips zero-reference MOCs.
+- Vault-side (no code): canonical MOC pages re-pointed `up: [[Home]]` (fixed 7 self-references); `Business/Personal.md` fallback hub got the Inbox query; 12 duplicate/stub entry-point files deleted after body-diff verification; T1–T3 implemented by codex-cli from Claude specs, all verified red-first and locally green (687 passed).
+
 ## [0.14.0] — 2026-07-27
 
 ### What's new
