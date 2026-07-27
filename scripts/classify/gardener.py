@@ -42,7 +42,7 @@ class _VaultMetrics:
     unclassified: int
     orphan_count: int
     review_queue_count: int
-    exhaust_files: list[str]
+    exhaust_files: list[Path]
 
 
 @dataclass(frozen=True)
@@ -221,11 +221,14 @@ def _review_queue_count(vault: Path) -> int:
     return len(lines)
 
 
-def _exhaust_files(vault: Path) -> list[str]:
+def _exhaust_files(vault: Path) -> list[Path]:
     return sorted(
-        path.name
-        for path in vault.iterdir()
-        if path.is_file() and _EXHAUST_RE.match(path.name)
+        (
+            path.resolve()
+            for path in vault.iterdir()
+            if path.is_file() and _EXHAUST_RE.match(path.name)
+        ),
+        key=lambda path: path.name,
     )
 
 
@@ -306,8 +309,8 @@ def _exhaust_lines(metrics: list[_VaultMetrics]) -> list[str]:
         if not item.exhaust_files:
             lines.append(f"- {item.name}: none")
         else:
-            for filename in item.exhaust_files:
-                lines.append(f"- {item.name}: {filename}")
+            for path in item.exhaust_files:
+                lines.append(f"- {item.name}: [{path.name}]({path.as_uri()})")
     return lines
 
 

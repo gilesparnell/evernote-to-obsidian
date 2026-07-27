@@ -13,6 +13,14 @@ Each entry is split into:
 
 ---
 
+## [0.14.0] — 2026-07-27
+
+### What's new
+- **Machine-exhaust files in the gardener report are now clickable.** Each stale report listed under "Machine exhaust" links straight to the file — click it in Obsidian and it opens in the browser instead of you hunting it down in Finder.
+
+### Under the hood
+- `scripts/classify/gardener.py`: `_exhaust_files` now returns resolved `Path`s (still sorted by filename, so the coverage-table count and health score are unchanged) and `_exhaust_lines` renders `[name](Path.as_uri())`, which percent-encodes spaces and special characters in vault paths. Vaults with no exhaust keep the plain `none` line. Covered by `tests/unit/classify/test_gardener.py::TestGardenerExhaustLinks` (link rendering, `%20` encoding, plain-none guard), written red-first.
+
 ## [0.13.0] — 2026-07-21
 
 ### What's new

@@ -110,6 +110,54 @@ class TestGardenerVaultMetrics:
         assert "| Business |" in report
 
 
+class TestGardenerExhaustLinks:
+    def test_exhaust_entry_renders_as_clickable_file_uri_link(
+        self, gardener, vault: Path, tmp_path: Path
+    ) -> None:
+        exhaust = vault / "classification-review-2026-07-20.html"
+        _write(exhaust, "<html></html>\n")
+
+        report = gardener.build_report(
+            vaults=[vault],
+            run_state={"complete": True, "steps": {}},
+            json_out=tmp_path,
+        )
+
+        expected = (
+            f"- Personal: [classification-review-2026-07-20.html]"
+            f"({exhaust.resolve().as_uri()})"
+        )
+        assert expected in report
+
+    def test_exhaust_link_percent_encodes_spaces_in_vault_path(
+        self, gardener, tmp_path: Path
+    ) -> None:
+        spaced_vault = tmp_path / "My Vault"
+        spaced_vault.mkdir()
+        exhaust = spaced_vault / "classification-review.html"
+        _write(exhaust, "<html></html>\n")
+
+        report = gardener.build_report(
+            vaults=[spaced_vault],
+            run_state={"complete": True, "steps": {}},
+            json_out=tmp_path,
+        )
+
+        assert f"({exhaust.resolve().as_uri()})" in report
+        assert "My%20Vault" in report
+
+    def test_vault_without_exhaust_keeps_plain_none_line(
+        self, gardener, vault: Path, tmp_path: Path
+    ) -> None:
+        report = gardener.build_report(
+            vaults=[vault],
+            run_state={"complete": True, "steps": {}},
+            json_out=tmp_path,
+        )
+
+        assert "- Personal: none" in report
+
+
 class TestGardenerRunState:
     def test_interrupted_run_renders_complete_false_and_step_table(
         self, gardener, vault: Path, tmp_path: Path
