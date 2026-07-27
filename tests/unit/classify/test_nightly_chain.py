@@ -309,6 +309,117 @@ def test_gardener_runs_even_when_every_other_step_failed(
     assert _state(tmp_path / "state")["steps"]["gardener"]["status"] == "ok"
 
 
+def test_gardener_step_writes_home_in_both_vaults(
+    nightly_chain, tmp_path: Path, vaults: tuple[Path, Path], monkeypatch
+) -> None:
+    personal, business = vaults
+    (personal / "wiki" / "topics").mkdir(parents=True)
+    (business / "wiki" / "topics").mkdir(parents=True)
+    (personal / "wiki" / "gardener.md").write_text(
+        "Health score: 70/100\n",
+        encoding="utf-8",
+    )
+    (personal / "wiki" / "index.md").write_text("# Wiki\n", encoding="utf-8")
+    (business / "wiki" / "index.md").write_text("# Wiki\n", encoding="utf-8")
+
+    monkeypatch.setattr(nightly_chain, "check_lm_studio", lambda: {"available": True})
+    monkeypatch.setattr(
+        nightly_chain,
+        "_step_export",
+        lambda context: nightly_chain.StepResult("ok", "export ok"),
+    )
+    monkeypatch.setattr(
+        nightly_chain,
+        "_step_classify",
+        lambda context: nightly_chain.StepResult("ok", "classify ok"),
+    )
+    monkeypatch.setattr(
+        nightly_chain,
+        "_step_collect",
+        lambda context: nightly_chain.StepResult("ok", "collect ok"),
+    )
+    monkeypatch.setattr(
+        nightly_chain,
+        "_step_synthesize",
+        lambda context: nightly_chain.StepResult("ok", "synthesize ok"),
+    )
+    monkeypatch.setattr(
+        nightly_chain,
+        "_step_backlink",
+        lambda context: nightly_chain.StepResult("ok", "backlink ok"),
+    )
+    monkeypatch.setattr(
+        nightly_chain,
+        "_step_propose",
+        lambda context: nightly_chain.StepResult("ok", "propose ok"),
+    )
+    monkeypatch.setattr(
+        nightly_chain,
+        "STEP_SPECS",
+        (
+            nightly_chain.StepSpec("export", nightly_chain._step_export),
+            nightly_chain.StepSpec("classify", nightly_chain._step_classify),
+            nightly_chain.StepSpec("collect", nightly_chain._step_collect),
+            nightly_chain.StepSpec("synthesize", nightly_chain._step_synthesize),
+            nightly_chain.StepSpec("backlink", nightly_chain._step_backlink),
+            nightly_chain.StepSpec("propose", nightly_chain._step_propose),
+            nightly_chain.StepSpec("gardener", nightly_chain._step_gardener),
+        ),
+    )
+
+    assert _run_cli(nightly_chain, tmp_path, vaults, "--mode", "nightly") == 0
+
+    personal_home = (personal / "Home.md").read_text(encoding="utf-8")
+    business_home = (business / "Home.md").read_text(encoding="utf-8")
+    assert "## Topics & synthesis" in personal_home
+    assert "Health 70/100" in personal_home
+    assert "## Topics & synthesis" in business_home
+    assert "[Wiki index](wiki/index.md)" in business_home
+    assert (
+        _state(tmp_path / "state")["steps"]["gardener"]["detail"]
+        == "gardener report + 2 home pages written"
+    )
+
+
+def test_panel_mode_leaves_home_files_untouched(
+    nightly_chain, tmp_path: Path, vaults: tuple[Path, Path], monkeypatch
+) -> None:
+    personal, business = vaults
+    personal_home = personal / "Home.md"
+    personal_home.write_text("# Home\nKeep me.\n", encoding="utf-8")
+
+    monkeypatch.setattr(nightly_chain, "check_lm_studio", lambda: {"available": True})
+    monkeypatch.setattr(
+        nightly_chain,
+        "STEP_SPECS",
+        (
+            nightly_chain.StepSpec(
+                "classify",
+                lambda context: nightly_chain.StepResult("ok", ""),
+            ),
+            nightly_chain.StepSpec(
+                "collect",
+                lambda context: nightly_chain.StepResult("ok", ""),
+            ),
+            nightly_chain.StepSpec(
+                "synthesize",
+                lambda context: nightly_chain.StepResult("ok", ""),
+            ),
+            nightly_chain.StepSpec(
+                "backlink",
+                lambda context: nightly_chain.StepResult("ok", ""),
+            ),
+            nightly_chain.StepSpec("gardener", nightly_chain._step_gardener),
+        ),
+    )
+
+    assert _run_cli(nightly_chain, tmp_path, vaults, "--mode", "panel") == 0
+
+    assert personal_home.read_text(encoding="utf-8") == "# Home\nKeep me.\n"
+    assert not (business / "Home.md").exists()
+    assert "gardener" not in _state(tmp_path / "state")["steps"]
+
+
 class TestLMStudioPreflight:
     def _stub_steps(self, nightly_chain, monkeypatch) -> None:
         def ok(context):

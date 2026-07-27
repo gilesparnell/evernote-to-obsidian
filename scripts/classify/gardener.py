@@ -60,7 +60,7 @@ def build_report(*, vaults: list[Path], run_state: dict, json_out: Path) -> str:
     freshness = [
         row
         for vault in vaults
-        for row in _topic_freshness(vault=vault, json_out=json_out)
+        for row in topic_freshness(vault=vault, json_out=json_out)
     ]
     topic_count = len(freshness)
     stale_topic_count = sum(1 for row in freshness if row.hash_changed is True)
@@ -170,7 +170,7 @@ def _vault_metrics(vault: Path) -> _VaultMetrics:
         coverage_ratio=classified / total if total else 1.0,
         unclassified=unclassified,
         orphan_count=_orphan_count(vault, files),
-        review_queue_count=_review_queue_count(vault),
+        review_queue_count=review_queue_count(vault),
         exhaust_files=_exhaust_files(vault),
     )
 
@@ -207,7 +207,7 @@ def _up_target_exists(*, vault: Path, current: Path, up: str) -> bool:
     return False
 
 
-def _review_queue_count(vault: Path) -> int:
+def review_queue_count(vault: Path) -> int:
     path = vault / _REVIEW_QUEUE_NAME
     if not path.exists():
         return 0
@@ -232,7 +232,7 @@ def _exhaust_files(vault: Path) -> list[Path]:
     )
 
 
-def _topic_freshness(*, vault: Path, json_out: Path) -> list[_TopicFreshness]:
+def topic_freshness(*, vault: Path, json_out: Path) -> list[_TopicFreshness]:
     rows: list[_TopicFreshness] = []
     for topic in load_topics(vault):
         cache = json_out / f"{vault.name}-{topic.slug}.json"
@@ -255,6 +255,10 @@ def _topic_freshness(*, vault: Path, json_out: Path) -> list[_TopicFreshness]:
             )
         )
     return rows
+
+
+_review_queue_count = review_queue_count
+_topic_freshness = topic_freshness
 
 
 def _read_json(path: Path) -> dict[str, Any]:

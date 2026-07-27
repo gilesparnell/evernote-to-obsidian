@@ -23,6 +23,7 @@ from scripts.classify.classify_vault import classify_vault
 from scripts.classify.lm_classifier import LM_STUDIO_BASE_URL
 from scripts.classify.collect_topic import collect_topic
 from scripts.classify.gardener import build_report, write_report
+from scripts.classify.home_dashboard import build_home_section, write_home
 from scripts.classify.synthesize_topic import SynthesisResult, synthesize_topic
 from scripts.classify.topic_backlinks import BacklinkSummary, reconcile_backlinks
 from scripts.classify.topics import Topic, load_topics
@@ -189,7 +190,14 @@ def _step_gardener(context: RunContext) -> StepResult:
         json_out=context.json_out,
     )
     write_report(vault=context.personal_vault, report_md=report, dry_run=context.dry_run)
-    return StepResult("ok", "gardener report written")
+    for vault in context.vaults:
+        section = build_home_section(
+            vault=vault,
+            json_out=context.json_out,
+            run_state=preview_state,
+        )
+        write_home(vault=vault, section_md=section, dry_run=context.dry_run)
+    return StepResult("ok", f"gardener report + {len(context.vaults)} home pages written")
 
 
 STEP_SPECS: tuple[StepSpec, ...] = (
