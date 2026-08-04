@@ -13,6 +13,7 @@ scoring logic; chain wiring lives in nightly_chain and reporting in gardener.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 import sys
@@ -357,6 +358,11 @@ class ProposerConfig:
     weight_size: float = 0.25
     size_target: int = 6  # N_target for the saturating size term
     factor_floor: float = 0.1  # smoothing so one zero dimension doesn't hard-veto
+    # Knowledge-item ledger (Unit 6): sub-floor clusters accumulate evidence
+    # across runs and promote to a proposal once they cross the bar.
+    ledger_half_life_days: float = 30.0
+    ledger_promote_bar: float = 1.0
+    ledger_evict_floor: float = 0.1
 
 
 @dataclass(frozen=True)
@@ -672,3 +678,176 @@ def create_topic_stubs(
         created=[p for p, _ in to_write], skipped=skipped,
         would_create=[], rolled_back=[],
     )
+
+
+# --- knowledge-item ledger (Unit 6) ----------------------------------------
+
+LEDGER_SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True)
+class LedgerEntry:
+    key: str
+    evidence: float
+    seen_count: int
+    distinct_anchors: tuple[str, ...]
+    last_seen: str
+    signature: str
+    slug: str | None
+    proposed: bool
+
+
+def _canonical_key(cluster: Cluster) -> str:
+    """Stable identity for a recurring sub-floor theme (its core anchor)."""
+    return cluster.dominant_anchor
+
+
+def ledger_path(vault: Path, state_dir: Path) -> Path:
+    return state_dir / f"{vault.name}-_proposer_ledger.json"
+
+
+def _entry_to_dict(entry: LedgerEntry) -> dict:
+    return {
+        "key": entry.key,
+        "evidence": entry.evidence,
+        "seen_count": entry.seen_count,
+        "distinct_anchors": list(entry.distinct_anchors),
+        "last_seen": entry.last_seen,
+        "signature": entry.signature,
+        "slug": entry.slug,
+        "proposed": entry.proposed,
+    }
+
+
+def _entry_from_dict(data: dict) -> LedgerEntry:
+    return LedgerEntry(
+        key=data["key"],
+        evidence=float(data["evidence"]),
+        seen_count=int(data["seen_count"]),
+        distinct_anchors=tuple(data.get("distinct_anchors", [])),
+        last_seen=data["last_seen"],
+        signature=data.get("signature", ""),
+        slug=data.get("slug"),
+        proposed=bool(data.get("proposed", False)),
+    )
+
+
+def load_ledger(path: Path) -> dict[str, LedgerEntry]:
+    """Load the ledger; a missing, corrupt, or wrong-schema file is treated as
+    empty (the ledger is derived state, reconstructible from the vault). A
+    corrupt file is backed up so nothing is silently lost."""
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("ledger root is not an object")
+        entries = data.get("entries", {})
+        return {key: _entry_from_dict(value) for key, value in entries.items()}
+    except (json.JSONDecodeError, ValueError, KeyError, TypeError, OSError):
+        try:
+            backup = path.with_name(f"{path.name}.corrupt.{int(path.stat().st_mtime)}")
+            path.replace(backup)
+        except OSError:
+            pass
+        return {}
+
+
+def save_ledger(path: Path, entries: dict[str, LedgerEntry]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": LEDGER_SCHEMA_VERSION,
+        "entries": {key: _entry_to_dict(entry) for key, entry in entries.items()},
+    }
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def update_ledger(
+    entries: dict[str, LedgerEntry],
+    scored_clusters: list[ScoredCluster],
+    *,
+    now: datetime,
+    config: ProposerConfig,
+) -> tuple[dict[str, LedgerEntry], list[LedgerEntry]]:
+    """Decay every entry, fold in this run's sub-floor sightings, promote any
+    that cross the evidence bar (once — de-nag), and evict stale unpromoted
+    entries. Returns (updated_entries, newly_promoted)."""
+    now_iso = now.isoformat()
+    half_life = config.ledger_half_life_days
+    updated: dict[str, LedgerEntry] = {}
+
+    # 1. Exponential time-decay of accumulated evidence.
+    for key, entry in entries.items():
+        decayed = entry.evidence
+        if half_life > 0:
+            try:
+                days = max(0.0, (now - datetime.fromisoformat(entry.last_seen)).total_seconds() / 86400)
+                decayed = entry.evidence * (0.5 ** (days / half_life))
+            except ValueError:
+                decayed = entry.evidence
+        updated[key] = replace(entry, evidence=decayed)
+
+    # 2. Fold in this run's sub-floor sightings (additive evidence).
+    for scored in scored_clusters:
+        key = _canonical_key(scored.cluster)
+        anchors = set(scored.cluster.anchors)
+        signature = cluster_signature(scored.cluster)
+        if key in updated:
+            entry = updated[key]
+            updated[key] = replace(
+                entry,
+                evidence=entry.evidence + scored.confidence,
+                seen_count=entry.seen_count + 1,
+                distinct_anchors=tuple(sorted(set(entry.distinct_anchors) | anchors)),
+                last_seen=now_iso,
+                signature=signature,
+            )
+        else:
+            updated[key] = LedgerEntry(
+                key=key,
+                evidence=scored.confidence,
+                seen_count=1,
+                distinct_anchors=tuple(sorted(anchors)),
+                last_seen=now_iso,
+                signature=signature,
+                slug=None,
+                proposed=False,
+            )
+
+    # 3. Promote entries crossing the bar (once each — de-nag).
+    promoted: list[LedgerEntry] = []
+    for key, entry in list(updated.items()):
+        if not entry.proposed and entry.evidence >= config.ledger_promote_bar:
+            entry = replace(entry, proposed=True)
+            updated[key] = entry
+            promoted.append(entry)
+
+    # 4. Evict stale unpromoted entries; keep proposed entries as de-nag markers.
+    updated = {
+        key: entry
+        for key, entry in updated.items()
+        if entry.proposed or entry.evidence >= config.ledger_evict_floor
+    }
+    return updated, promoted
+
+
+def acquire_ledger_lock(state_dir: Path, *, now: datetime, max_age_seconds: int = 3600) -> bool:
+    """Best-effort lock so a nightly and an on-demand run don't interleave
+    ledger/topic writes. A stale lock (older than max_age) is reclaimed."""
+    state_dir.mkdir(parents=True, exist_ok=True)
+    lock = state_dir / "_proposer.lock"
+    if lock.exists():
+        try:
+            held = datetime.fromisoformat(lock.read_text(encoding="utf-8").strip())
+            if (now - held).total_seconds() < max_age_seconds:
+                return False
+        except (ValueError, OSError):
+            pass  # unreadable lock → treat as stale
+    lock.write_text(now.isoformat(), encoding="utf-8")
+    return True
+
+
+def release_ledger_lock(state_dir: Path) -> None:
+    (state_dir / "_proposer.lock").unlink(missing_ok=True)

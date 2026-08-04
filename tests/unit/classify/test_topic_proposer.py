@@ -13,14 +13,20 @@ from types import SimpleNamespace
 from scripts.classify.topic_proposer import (
     NoteRef,
     ProposerConfig,
+    ScoredCluster,
     TopicProposal,
     classify_clusters,
     cluster_notes,
     cluster_signature,
     filter_alias_collisions,
     gather_unregistered_notes,
+    acquire_ledger_lock,
     create_topic_stubs,
+    load_ledger,
     propose_topic_metadata,
+    release_ledger_lock,
+    save_ledger,
+    update_ledger,
     resolve_collisions,
     score_cluster,
 )
@@ -508,3 +514,96 @@ class TestCreateStubs:
         assert not (d / "zzz.md").exists()  # rolled back
         assert [p.slug for p in res.rolled_back] == ["zzz"]
         assert any(t.slug == "aaa" for t in load_topics(tmp_path))  # vault still loads
+
+
+class TestLedger:
+    @staticmethod
+    def _scored(person: str, conf: float):
+        cluster = cluster_notes(
+            [_ref(f"{person}{i}.md", people={person}, tokens={"topic"}) for i in range(3)]
+        )[0]
+        return ScoredCluster(cluster=cluster, confidence=conf)
+
+    def test_single_sub_floor_sighting_is_recorded_not_promoted(self) -> None:
+        now = datetime(2026, 8, 5, tzinfo=AEST)
+        cfg = ProposerConfig(ledger_promote_bar=1.0)
+
+        entries, promoted = update_ledger({}, [self._scored("connor", 0.3)], now=now, config=cfg)
+
+        assert promoted == []
+        assert len(entries) == 1
+        assert next(iter(entries.values())).seen_count == 1
+
+    def test_recurrence_accumulates_and_promotes_once(self) -> None:
+        cfg = ProposerConfig(ledger_promote_bar=0.7, ledger_half_life_days=3650)
+        entries: dict = {}
+        promoted_total = []
+        for day in range(3):
+            now = datetime(2026, 8, 5 + day, tzinfo=AEST)
+            entries, promoted = update_ledger(
+                entries, [self._scored("connor", 0.3)], now=now, config=cfg
+            )
+            promoted_total.extend(promoted)
+
+        # 0.3 * 3 = 0.9 >= 0.7 → promoted exactly once (de-nag on later runs).
+        assert len(promoted_total) == 1
+        assert entries[next(iter(entries))].proposed is True
+
+    def test_promoted_entry_is_not_re_promoted(self) -> None:
+        cfg = ProposerConfig(ledger_promote_bar=0.2, ledger_half_life_days=3650)
+        now = datetime(2026, 8, 5, tzinfo=AEST)
+        entries, first = update_ledger({}, [self._scored("connor", 0.3)], now=now, config=cfg)
+        assert len(first) == 1
+
+        entries, second = update_ledger(
+            entries, [self._scored("connor", 0.3)],
+            now=datetime(2026, 8, 6, tzinfo=AEST), config=cfg,
+        )
+        assert second == []  # already proposed
+
+    def test_stale_unpromoted_entry_decays_and_is_evicted(self) -> None:
+        cfg = ProposerConfig(
+            ledger_promote_bar=99.0, ledger_evict_floor=0.1, ledger_half_life_days=10
+        )
+        entries, _ = update_ledger(
+            {}, [self._scored("connor", 0.3)],
+            now=datetime(2026, 8, 5, tzinfo=AEST), config=cfg,
+        )
+        assert len(entries) == 1
+
+        # 120 days later with no new sighting: 0.3 * 0.5**12 ≈ 7e-5 < floor → gone.
+        entries, _ = update_ledger(
+            entries, [], now=datetime(2026, 12, 3, tzinfo=AEST), config=cfg
+        )
+        assert entries == {}
+
+    def test_load_missing_ledger_returns_empty(self, tmp_path: Path) -> None:
+        assert load_ledger(tmp_path / "nope.json") == {}
+
+    def test_corrupt_ledger_backs_up_and_returns_empty(self, tmp_path: Path) -> None:
+        path = tmp_path / "led.json"
+        path.write_text("{ this is not json", encoding="utf-8")
+
+        assert load_ledger(path) == {}
+        backups = list(tmp_path.glob("led.json.corrupt.*"))
+        assert len(backups) == 1
+
+    def test_save_then_load_roundtrips(self, tmp_path: Path) -> None:
+        path = tmp_path / "led.json"
+        now = datetime(2026, 8, 5, tzinfo=AEST)
+        entries, _ = update_ledger(
+            {}, [self._scored("connor", 0.3)], now=now, config=ProposerConfig()
+        )
+        save_ledger(path, entries)
+
+        loaded = load_ledger(path)
+        assert set(loaded) == set(entries)
+        assert next(iter(loaded.values())).seen_count == 1
+
+    def test_lockfile_serialises_overlapping_runs(self, tmp_path: Path) -> None:
+        now = datetime(2026, 8, 5, 23, 0, tzinfo=AEST)
+
+        assert acquire_ledger_lock(tmp_path, now=now) is True
+        assert acquire_ledger_lock(tmp_path, now=now) is False  # held
+        release_ledger_lock(tmp_path)
+        assert acquire_ledger_lock(tmp_path, now=now) is True  # released
