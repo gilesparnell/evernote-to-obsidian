@@ -7,15 +7,22 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from scripts.classify.topic_proposer import (
     NoteRef,
     ProposerConfig,
+    TopicProposal,
     classify_clusters,
     cluster_notes,
+    cluster_signature,
+    filter_alias_collisions,
     gather_unregistered_notes,
+    propose_topic_metadata,
+    resolve_collisions,
     score_cluster,
 )
+from scripts.classify.topics import Topic, validate
 
 
 def _ref(
@@ -297,3 +304,117 @@ class TestConfidenceAndRouting:
 
         total = len(routing.auto) + len(routing.propose) + len(routing.ledger)
         assert total == len(clusters)
+
+
+class TestNamingAndSafety:
+    @staticmethod
+    def _cluster(person: str, tokens: set[str], n: int = 3):
+        return cluster_notes(
+            [_ref(f"{person}{i}.md", people={person}, tokens=tokens) for i in range(n)]
+        )[0]
+
+    @staticmethod
+    def _topic(slug: str, aliases: list[str]) -> Topic:
+        return Topic(slug=slug, aliases=aliases, status="active", path=Path(f"{slug}.md"))
+
+    def test_signature_stable_for_same_members_distinct_otherwise(self) -> None:
+        c1 = self._cluster("connor", {"homework"})
+        c2 = self._cluster("connor", {"homework"})
+        c3 = self._cluster("bob", {"tennis"})
+
+        assert cluster_signature(c1) == cluster_signature(c2)
+        assert cluster_signature(c1) != cluster_signature(c3)
+
+    def test_llm_naming_used_when_available(self, monkeypatch) -> None:
+        import scripts.classify.topic_proposer as tp
+
+        def fake_generate_structured(**kwargs):
+            return SimpleNamespace(
+                name="Connor — behaviour",
+                aliases=["Connor behaviour", "Connor discipline"],
+                description="Notes about Connor's behaviour.",
+            )
+
+        monkeypatch.setattr(tp, "generate_structured", fake_generate_structured)
+        proposal = propose_topic_metadata(
+            self._cluster("connor", {"homework"}), client=object(), lm_available=True
+        )
+
+        assert proposal.source == "llm"
+        assert proposal.name == "Connor — behaviour"
+        assert "Connor discipline" in proposal.aliases
+        assert proposal.slug == "connor-behaviour"
+
+    def test_fallback_naming_when_lm_unavailable(self) -> None:
+        proposal = propose_topic_metadata(
+            self._cluster("connor", {"homework"}), client=None, lm_available=False
+        )
+
+        assert proposal.source == "fallback"
+        assert "connor" in proposal.slug
+        assert proposal.aliases  # never empty
+
+    def test_fallback_when_structured_output_errors(self, monkeypatch) -> None:
+        import scripts.classify.topic_proposer as tp
+        from scripts.classify.structured_output import StructuredOutputError
+
+        def boom(**kwargs):
+            raise StructuredOutputError("no json")
+
+        monkeypatch.setattr(tp, "generate_structured", boom)
+        proposal = propose_topic_metadata(
+            self._cluster("connor", {"homework"}), client=object(), lm_available=True
+        )
+
+        assert proposal.source == "fallback"
+
+    def test_filter_alias_collisions_drops_existing(self) -> None:
+        existing = [self._topic("budget", ["Budget", "spending"])]
+        survivors = filter_alias_collisions(["budget", "Mortgage"], existing)
+
+        assert survivors == ["Mortgage"]  # casefold collision dropped
+
+    def test_resolve_new_vs_new_alias_collision(self) -> None:
+        c = self._cluster("connor", {"homework"})
+        p1 = TopicProposal(
+            signature="s1", slug="one", name="One", aliases=("Shared", "OnlyOne"),
+            description="", source="fallback", cluster=c,
+        )
+        p2 = TopicProposal(
+            signature="s2", slug="two", name="Two", aliases=("shared",),
+            description="", source="fallback", cluster=c,
+        )
+
+        accepted, rejected = resolve_collisions([p1, p2], existing_topics=[])
+
+        # p1 keeps both; p2's only alias collides with p1 → p2 rejected.
+        assert [p.slug for p in accepted] == ["one"]
+        assert [p.slug for p in rejected] == ["two"]
+
+    def test_resolve_rejects_slug_collision_with_existing(self) -> None:
+        c = self._cluster("connor", {"homework"})
+        existing = [self._topic("dup", ["Existing"])]
+        p = TopicProposal(
+            signature="s", slug="dup", name="Dup", aliases=("Fresh",),
+            description="", source="fallback", cluster=c,
+        )
+
+        accepted, rejected = resolve_collisions([p], existing_topics=existing)
+
+        assert accepted == []
+        assert [p.slug for p in rejected] == ["dup"]
+
+    def test_accepted_union_passes_strict_validate(self) -> None:
+        c = self._cluster("connor", {"homework"})
+        existing = [self._topic("budget", ["Budget"])]
+        p = TopicProposal(
+            signature="s", slug="connor", name="Connor", aliases=("Connor", "Budget"),
+            description="", source="fallback", cluster=c,
+        )
+
+        accepted, _ = resolve_collisions([p], existing_topics=existing)
+        union = existing + [
+            Topic(slug=p.slug, aliases=list(p.aliases), status="active", path=Path("x.md"))
+            for p in accepted
+        ]
+        validate(union)  # must not raise — "Budget" was dropped from the proposal
