@@ -119,7 +119,7 @@ def collect_topic(*, vault: Path, topic: Topic, json_out: Path) -> Path:
     return cache_path
 
 
-def _iter_source_notes(vault: Path) -> Iterator[Path]:
+def iter_source_notes(vault: Path) -> Iterator[Path]:
     for path in sorted(vault.rglob("*.md")):
         rel_parts = path.relative_to(vault).parts
         if any(part.startswith(".") for part in rel_parts):
@@ -131,6 +131,11 @@ def _iter_source_notes(vault: Path) -> Iterator[Path]:
         ):
             continue
         yield path
+
+
+# Third consumer of this iterator (topic_backlinks, topic_proposer) — a helper
+# imported by three modules isn't private. Alias kept for existing importers.
+_iter_source_notes = iter_source_notes
 
 
 def _matched_aliases(*, aliases: Iterable[str], filename: str, body: str) -> list[str]:
