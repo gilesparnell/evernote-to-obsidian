@@ -8,7 +8,30 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from scripts.classify.topic_proposer import NoteRef, gather_unregistered_notes
+from scripts.classify.topic_proposer import (
+    NoteRef,
+    cluster_notes,
+    gather_unregistered_notes,
+)
+
+
+def _ref(
+    rel: str,
+    *,
+    people: set[str] | None = None,
+    tags: set[str] | None = None,
+    org: str | None = None,
+    tokens: set[str] | None = None,
+) -> NoteRef:
+    return NoteRef(
+        path=Path(rel),
+        rel=rel,
+        title=rel,
+        people=frozenset(people or set()),
+        tags=frozenset(tags or set()),
+        org=org,
+        tokens=frozenset(tokens or set()),
+    )
 
 
 AEST = timezone(timedelta(hours=10))
@@ -124,3 +147,85 @@ class TestGatherUnregistered:
         assert "parenting" in ref.tags
         assert "homework" in ref.tokens
         assert "connor" in ref.tokens
+
+
+class TestClusterNotes:
+    def test_three_notes_sharing_a_person_form_one_cluster(self) -> None:
+        refs = [
+            _ref("a.md", people={"connor"}, tokens={"homework", "lying", "school"}),
+            _ref("b.md", people={"connor"}, tokens={"homework", "chores", "lying"}),
+            _ref("c.md", people={"connor"}, tokens={"school", "lying", "phone"}),
+        ]
+
+        clusters = cluster_notes(refs)
+
+        assert len(clusters) == 1
+        assert {m.rel for m in clusters[0].members} == {"a.md", "b.md", "c.md"}
+
+    def test_generic_tag_alone_forms_no_cluster(self) -> None:
+        refs = [
+            _ref("a.md", tags={"draft"}, tokens={"alpha"}),
+            _ref("b.md", tags={"draft"}, tokens={"beta"}),
+            _ref("c.md", tags={"draft"}, tokens={"gamma"}),
+        ]
+
+        assert cluster_notes(refs) == []
+
+    def test_incidental_token_overlap_alone_forms_no_cluster(self) -> None:
+        # Shared tokens but NO shared categorical anchor → no edge (AND-gate).
+        refs = [
+            _ref("a.md", people={"alice"}, tokens={"meeting", "notes"}),
+            _ref("b.md", people={"bob"}, tokens={"meeting", "notes"}),
+            _ref("c.md", people={"carol"}, tokens={"meeting", "notes"}),
+        ]
+
+        assert cluster_notes(refs) == []
+
+    def test_singletons_and_pairs_are_not_clusters(self) -> None:
+        refs = [
+            _ref("a.md", people={"x"}),
+            _ref("b.md", people={"x"}),  # only a pair share x
+            _ref("c.md", people={"y"}),  # one-off
+        ]
+
+        assert cluster_notes(refs) == []
+
+    def test_chain_does_not_weld_into_a_cluster(self) -> None:
+        # a~b (share x), b~c (share y), a≁c → a 3-chain, not a clique.
+        refs = [
+            _ref("a.md", people={"x"}),
+            _ref("b.md", people={"x", "y"}),
+            _ref("c.md", people={"y"}),
+        ]
+
+        assert cluster_notes(refs) == []
+
+    def test_two_distinct_themes_yield_two_clusters(self) -> None:
+        refs = [
+            _ref("a1.md", people={"alice"}, tokens={"budget"}),
+            _ref("a2.md", people={"alice"}, tokens={"budget"}),
+            _ref("a3.md", people={"alice"}, tokens={"budget"}),
+            _ref("b1.md", people={"bob"}, tokens={"tennis"}),
+            _ref("b2.md", people={"bob"}, tokens={"tennis"}),
+            _ref("b3.md", people={"bob"}, tokens={"tennis"}),
+        ]
+
+        clusters = cluster_notes(refs)
+
+        assert len(clusters) == 2
+        sizes = sorted(len(c.members) for c in clusters)
+        assert sizes == [3, 3]
+
+    def test_cluster_exposes_anchors_and_cohesion(self) -> None:
+        refs = [
+            _ref("a.md", people={"connor"}, tokens={"homework", "lying"}),
+            _ref("b.md", people={"connor"}, tokens={"homework", "lying"}),
+            _ref("c.md", people={"connor"}, tokens={"homework", "chores"}),
+        ]
+
+        cluster = cluster_notes(refs)[0]
+
+        assert "person:connor" in cluster.anchors
+        assert cluster.anchor_density == 1.0
+        assert 0.0 <= cluster.cohesion <= 1.0
+        assert cluster.cohesion > 0.0  # they share real tokens

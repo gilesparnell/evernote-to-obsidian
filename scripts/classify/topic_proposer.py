@@ -13,11 +13,13 @@ scoring logic; chain wiring lives in nightly_chain and reporting in gardener.
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import sys
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from itertools import combinations
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -49,6 +51,28 @@ class NoteRef:
     tags: frozenset[str]
     org: str | None
     tokens: frozenset[str]
+
+
+@dataclass(frozen=True)
+class Cluster:
+    """A cohesive group of unregistered notes sharing categorical anchors."""
+
+    members: tuple[NoteRef, ...]
+    anchors: frozenset[str]  # anchors shared by a majority of members (namespaced)
+    dominant_anchor: str  # the single most common anchor (for naming/slug fallback)
+    anchor_density: float  # fraction of member pairs sharing an anchor (0..1)
+    cohesion: float  # mean pairwise IDF-weighted-Jaccard of member tokens (0..1)
+
+
+# Clustering thresholds (consolidated into ProposerConfig in Unit 3).
+_MIN_CLUSTER_SIZE = 3
+_MIN_DENSITY = 0.7
+
+# Anchors so generic they carry no thematic signal — excluded from the gate.
+_GENERIC_TAGS = frozenset(
+    {"draft", "todo", "inbox", "clipping", "reference", "note", "untitled"}
+)
+_GENERIC_ORGS = frozenset({"unknown", "personal", "none", ""})
 
 
 # --- folding / tokenising --------------------------------------------------
@@ -152,3 +176,143 @@ def gather_unregistered_notes(
             by_body[body_sha] = ref
 
     return sorted(by_body.values(), key=lambda ref: ref.rel)
+
+
+# --- clustering (Unit 2) ---------------------------------------------------
+
+def _anchors(ref: NoteRef) -> frozenset[str]:
+    """Namespaced categorical anchors — the only signal that forms an edge.
+
+    Tokens deliberately are NOT anchors: text overlap strengthens confidence
+    (Unit 3) but never *creates* a cluster on its own (the AND-gate that
+    defeats incidental-token junk merges).
+    """
+    anchors = {f"person:{p}" for p in ref.people}
+    anchors |= {f"tag:{t}" for t in ref.tags if t not in _GENERIC_TAGS}
+    if ref.org and ref.org not in _GENERIC_ORGS:
+        anchors.add(f"org:{ref.org}")
+    return frozenset(anchors)
+
+
+def _idf(notes: list[NoteRef]) -> dict[str, float]:
+    n = len(notes)
+    df: dict[str, int] = {}
+    for ref in notes:
+        for tok in ref.tokens:
+            df[tok] = df.get(tok, 0) + 1
+    # Smoothed IDF: common tokens (high df) approach zero weight.
+    return {tok: math.log((n + 1) / (count + 1)) + 1.0 for tok, count in df.items()}
+
+
+def _weighted_jaccard(a: NoteRef, b: NoteRef, idf: dict[str, float]) -> float:
+    shared = a.tokens & b.tokens
+    union = a.tokens | b.tokens
+    if not union:
+        return 0.0
+    num = sum(idf.get(tok, 1.0) for tok in shared)
+    den = sum(idf.get(tok, 1.0) for tok in union)
+    return num / den if den else 0.0
+
+
+def _density(members: set[int], adj: dict[int, set[int]]) -> float:
+    n = len(members)
+    if n < 2:
+        return 0.0
+    edges = sum(1 for i, j in combinations(sorted(members), 2) if j in adj[i])
+    return edges / (n * (n - 1) / 2)
+
+
+def _components(nodes: list[int], adj: dict[int, set[int]]) -> list[set[int]]:
+    seen: set[int] = set()
+    comps: list[set[int]] = []
+    for start in nodes:
+        if start in seen:
+            continue
+        stack = [start]
+        comp: set[int] = set()
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            comp.add(node)
+            stack.extend(adj[node] - seen)
+        comps.append(comp)
+    return comps
+
+
+def _dense_core(
+    comp: set[int], adj: dict[int, set[int]], min_size: int, min_density: float
+) -> set[int] | None:
+    """Peel the least-connected member until the group is a near-clique.
+
+    Complete-linkage-style: a loose chain (density below the floor) is thinned
+    until a dense core remains, or it drops below min_size and is discarded.
+    """
+    members = set(comp)
+    while len(members) >= min_size:
+        if _density(members, adj) >= min_density:
+            return members
+        victim = min(members, key=lambda m: (len(adj[m] & members), m))
+        members.discard(victim)
+    return None
+
+
+def _build_cluster(members: set[int], notes: list[NoteRef], idf: dict[str, float],
+                   adj: dict[int, set[int]]) -> Cluster:
+    refs = tuple(sorted((notes[i] for i in members), key=lambda r: r.rel))
+    # Anchors shared by a majority of members; dominant = most common.
+    counts: dict[str, int] = {}
+    for i in members:
+        for anchor in _anchors(notes[i]):
+            counts[anchor] = counts.get(anchor, 0) + 1
+    majority = (len(members) + 1) // 2
+    shared = frozenset(a for a, c in counts.items() if c >= majority)
+    dominant = max(counts, key=lambda a: (counts[a], a))
+    pairs = list(combinations(sorted(members), 2))
+    cohesion = (
+        sum(_weighted_jaccard(notes[i], notes[j], idf) for i, j in pairs) / len(pairs)
+        if pairs
+        else 0.0
+    )
+    return Cluster(
+        members=refs,
+        anchors=shared or frozenset({dominant}),
+        dominant_anchor=dominant,
+        anchor_density=_density(members, adj),
+        cohesion=cohesion,
+    )
+
+
+def cluster_notes(
+    notes: list[NoteRef],
+    *,
+    min_size: int = _MIN_CLUSTER_SIZE,
+    min_density: float = _MIN_DENSITY,
+) -> list[Cluster]:
+    """Group unregistered notes into cohesive near-clique clusters.
+
+    An edge exists only between notes sharing a specific categorical anchor;
+    clusters must be near-cliques (density-gated) so a chain of pairwise links
+    never welds unrelated notes together. Singletons/pairs stay unclustered.
+    """
+    if len(notes) < min_size:
+        return []
+
+    idf = _idf(notes)
+    anchor_sets = [_anchors(ref) for ref in notes]
+    adj: dict[int, set[int]] = {i: set() for i in range(len(notes))}
+    for i, j in combinations(range(len(notes)), 2):
+        if anchor_sets[i] & anchor_sets[j]:
+            adj[i].add(j)
+            adj[j].add(i)
+
+    clusters: list[Cluster] = []
+    for comp in _components(list(range(len(notes))), adj):
+        if len(comp) < min_size:
+            continue
+        core = _dense_core(comp, adj, min_size, min_density)
+        if core is not None:
+            clusters.append(_build_cluster(core, notes, idf, adj))
+
+    return sorted(clusters, key=lambda c: (-len(c.members), c.members[0].rel))
