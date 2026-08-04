@@ -10,8 +10,11 @@ from pathlib import Path
 
 from scripts.classify.topic_proposer import (
     NoteRef,
+    ProposerConfig,
+    classify_clusters,
     cluster_notes,
     gather_unregistered_notes,
+    score_cluster,
 )
 
 
@@ -229,3 +232,68 @@ class TestClusterNotes:
         assert cluster.anchor_density == 1.0
         assert 0.0 <= cluster.cohesion <= 1.0
         assert cluster.cohesion > 0.0  # they share real tokens
+
+
+class TestConfidenceAndRouting:
+    def _strong(self):
+        # 5 notes sharing a person + heavily overlapping distinctive tokens.
+        toks = {"mortgage", "offset", "refinance", "valuation"}
+        return cluster_notes(
+            [_ref(f"s{i}.md", people={"banker"}, tokens=toks) for i in range(5)]
+        )[0]
+
+    def _weak(self):
+        # 3 notes sharing a person but with disjoint tokens (no text cohesion).
+        return cluster_notes(
+            [
+                _ref("w0.md", people={"pal"}, tokens={"alpha"}),
+                _ref("w1.md", people={"pal"}, tokens={"beta"}),
+                _ref("w2.md", people={"pal"}, tokens={"gamma"}),
+            ]
+        )[0]
+
+    def test_confidence_is_in_unit_range(self) -> None:
+        assert 0.0 <= score_cluster(self._strong()) <= 1.0
+        assert 0.0 <= score_cluster(self._weak()) <= 1.0
+
+    def test_strong_cluster_outscores_weak(self) -> None:
+        assert score_cluster(self._strong()) > score_cluster(self._weak())
+
+    def test_geometric_mean_lets_weak_cohesion_veto_large_size(self) -> None:
+        # Big cluster, strong anchor, but ~zero text cohesion.
+        big = cluster_notes(
+            [_ref(f"b{i}.md", people={"pal"}, tokens={f"uniq{i}"}) for i in range(8)]
+        )[0]
+        # Smaller but genuinely cohesive cluster.
+        toks = {"reflux", "elimination", "dairy"}
+        balanced = cluster_notes(
+            [_ref(f"c{i}.md", people={"doc"}, tokens=toks) for i in range(4)]
+        )[0]
+
+        assert score_cluster(balanced) > score_cluster(big)
+
+    def test_default_config_never_auto_creates(self) -> None:
+        routing = classify_clusters([self._strong()], ProposerConfig())
+
+        assert routing.auto == []
+        assert len(routing.propose) + len(routing.ledger) == 1
+
+    def test_lowered_auto_threshold_promotes_a_strong_cluster(self) -> None:
+        cfg = ProposerConfig(auto_confidence=0.3)
+        routing = classify_clusters([self._strong()], cfg)
+
+        assert [sc.cluster for sc in routing.auto] == [self._strong()]
+
+    def test_sub_floor_cluster_goes_to_ledger(self) -> None:
+        cfg = ProposerConfig(auto_confidence=0.99, propose_floor=0.99)
+        routing = classify_clusters([self._weak()], cfg)
+
+        assert routing.propose == []
+        assert len(routing.ledger) == 1
+
+    def test_routing_partitions_every_cluster(self) -> None:
+        clusters = [self._strong(), self._weak()]
+        routing = classify_clusters(clusters, ProposerConfig(auto_confidence=0.5))
+
+        total = len(routing.auto) + len(routing.propose) + len(routing.ledger)
+        assert total == len(clusters)

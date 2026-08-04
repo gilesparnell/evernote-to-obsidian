@@ -60,6 +60,7 @@ class Cluster:
     members: tuple[NoteRef, ...]
     anchors: frozenset[str]  # anchors shared by a majority of members (namespaced)
     dominant_anchor: str  # the single most common anchor (for naming/slug fallback)
+    dominant_share: float  # fraction of members carrying the dominant anchor (0..1)
     anchor_density: float  # fraction of member pairs sharing an anchor (0..1)
     cohesion: float  # mean pairwise IDF-weighted-Jaccard of member tokens (0..1)
 
@@ -279,6 +280,7 @@ def _build_cluster(members: set[int], notes: list[NoteRef], idf: dict[str, float
         members=refs,
         anchors=shared or frozenset({dominant}),
         dominant_anchor=dominant,
+        dominant_share=counts[dominant] / len(members),
         anchor_density=_density(members, adj),
         cohesion=cohesion,
     )
@@ -316,3 +318,90 @@ def cluster_notes(
             clusters.append(_build_cluster(core, notes, idf, adj))
 
     return sorted(clusters, key=lambda c: (-len(c.members), c.members[0].rel))
+
+
+# --- confidence + routing (Unit 3) -----------------------------------------
+
+@dataclass(frozen=True)
+class ProposerConfig:
+    """All U6 thresholds in one place. Defaults are deliberately conservative;
+    exact values are tuned against a labelled fixture set during rollout."""
+
+    min_cluster_size: int = _MIN_CLUSTER_SIZE
+    min_density: float = _MIN_DENSITY
+    # Auto-create starts DISABLED: confidence never exceeds 1.0, so every
+    # cluster routes to propose/ledger until the operator lowers this to a
+    # threshold whose >=0.95 precision has been measured on the accept/reject
+    # labels accumulated from the proposal queue (precision-first tuning).
+    auto_confidence: float = 1.01
+    propose_floor: float = 0.35
+    recency_days: int = 30
+    # Weighted geometric mean of (anchor breadth, text cohesion, saturating size).
+    weight_anchor: float = 0.4
+    weight_cohesion: float = 0.35
+    weight_size: float = 0.25
+    size_target: int = 6  # N_target for the saturating size term
+    factor_floor: float = 0.1  # smoothing so one zero dimension doesn't hard-veto
+
+
+@dataclass(frozen=True)
+class ScoredCluster:
+    cluster: Cluster
+    confidence: float
+
+
+@dataclass(frozen=True)
+class Routing:
+    auto: list[ScoredCluster]
+    propose: list[ScoredCluster]
+    ledger: list[ScoredCluster]
+
+
+def _saturating_size(n: int, target: int) -> float:
+    if n <= 1:
+        return 0.0
+    return min(1.0, math.log(n) / math.log(max(target, 2)))
+
+
+def _smooth(s: float, floor: float) -> float:
+    return floor + (1.0 - floor) * max(0.0, min(1.0, s))
+
+
+def score_cluster(cluster: Cluster, config: ProposerConfig | None = None) -> float:
+    """Deterministic confidence — a weighted geometric mean of anchor breadth,
+    text cohesion, and saturating size. Geometric (AND-like): a single weak
+    dimension drags the whole score down, the precision-first behaviour that
+    keeps an incoherent-but-large cluster from ever auto-creating."""
+    cfg = config or ProposerConfig()
+    s_anchor = _smooth(cluster.dominant_share, cfg.factor_floor)
+    s_cohesion = _smooth(cluster.cohesion, cfg.factor_floor)
+    s_size = _smooth(_saturating_size(len(cluster.members), cfg.size_target), cfg.factor_floor)
+    return (
+        s_anchor**cfg.weight_anchor
+        * s_cohesion**cfg.weight_cohesion
+        * s_size**cfg.weight_size
+    )
+
+
+def classify_clusters(
+    clusters: list[Cluster], config: ProposerConfig | None = None
+) -> Routing:
+    """Route each cluster to auto-create / propose / ledger by confidence."""
+    cfg = config or ProposerConfig()
+    auto: list[ScoredCluster] = []
+    propose: list[ScoredCluster] = []
+    ledger: list[ScoredCluster] = []
+    for cluster in clusters:
+        conf = score_cluster(cluster, cfg)
+        scored = ScoredCluster(cluster=cluster, confidence=conf)
+        if (
+            conf >= cfg.auto_confidence
+            and len(cluster.members) >= cfg.min_cluster_size
+            and cluster.anchor_density >= cfg.min_density
+        ):
+            auto.append(scored)
+        elif conf >= cfg.propose_floor:
+            propose.append(scored)
+        else:
+            ledger.append(scored)
+    return Routing(auto=auto, propose=propose, ledger=ledger)
