@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import hashlib
 from types import SimpleNamespace
 
 from scripts.classify.topic_proposer import (
@@ -18,11 +19,12 @@ from scripts.classify.topic_proposer import (
     cluster_signature,
     filter_alias_collisions,
     gather_unregistered_notes,
+    create_topic_stubs,
     propose_topic_metadata,
     resolve_collisions,
     score_cluster,
 )
-from scripts.classify.topics import Topic, validate
+from scripts.classify.topics import Topic, load_topics, validate
 
 
 def _ref(
@@ -418,3 +420,91 @@ class TestNamingAndSafety:
             for p in accepted
         ]
         validate(union)  # must not raise — "Budget" was dropped from the proposal
+
+
+def _dummy_cluster():
+    return cluster_notes(
+        [_ref(f"d{i}.md", people={"connor"}, tokens={"homework"}) for i in range(3)]
+    )[0]
+
+
+def _proposal(slug: str, aliases: list[str], name: str | None = None) -> TopicProposal:
+    return TopicProposal(
+        signature="sig:" + slug,
+        slug=slug,
+        name=name or slug,
+        aliases=tuple(aliases),
+        description="desc",
+        source="llm",
+        cluster=_dummy_cluster(),
+    )
+
+
+class TestCreateStubs:
+    def test_writes_valid_active_stub(self, tmp_path: Path) -> None:
+        (tmp_path / "wiki" / "topics").mkdir(parents=True)
+
+        res = create_topic_stubs(
+            tmp_path, [_proposal("connor-behaviour", ["Connor behaviour", "Connor"])]
+        )
+
+        assert [p.slug for p in res.created] == ["connor-behaviour"]
+        assert (tmp_path / "wiki" / "topics" / "connor-behaviour.md").exists()
+        topics = load_topics(tmp_path)
+        assert any(t.slug == "connor-behaviour" and t.status == "active" for t in topics)
+
+    def test_never_overwrites_existing_slug(self, tmp_path: Path) -> None:
+        d = tmp_path / "wiki" / "topics"
+        d.mkdir(parents=True)
+        (d / "foo.md").write_text(
+            "---\ntype: topic\nslug: foo\naliases: [Original]\nstatus: active\n---\nkeep\n",
+            encoding="utf-8",
+        )
+        before = (d / "foo.md").read_bytes()
+
+        res = create_topic_stubs(tmp_path, [_proposal("foo", ["New"])])
+
+        assert res.created == []
+        assert [p.slug for p in res.skipped] == ["foo"]
+        assert (d / "foo.md").read_bytes() == before
+
+    def test_dry_run_writes_nothing(self, tmp_path: Path) -> None:
+        (tmp_path / "wiki" / "topics").mkdir(parents=True)
+
+        res = create_topic_stubs(tmp_path, [_proposal("x-topic", ["X"])], dry_run=True)
+
+        assert not (tmp_path / "wiki" / "topics" / "x-topic.md").exists()
+        assert [p.slug for p in res.would_create] == ["x-topic"]
+
+    def test_unsafe_slug_is_rejected(self, tmp_path: Path) -> None:
+        (tmp_path / "wiki" / "topics").mkdir(parents=True)
+
+        res = create_topic_stubs(tmp_path, [_proposal("../evil", ["E"])])
+
+        assert res.created == []
+        assert not (tmp_path / "evil.md").exists()
+        assert not (tmp_path / "wiki" / "evil.md").exists()
+
+    def test_additive_only_leaves_source_notes_untouched(self, tmp_path: Path) -> None:
+        (tmp_path / "wiki" / "topics").mkdir(parents=True)
+        note = tmp_path / "note.md"
+        note.write_text("---\ntype: note\n---\nbody\n", encoding="utf-8")
+        before = hashlib.sha256(note.read_bytes()).hexdigest()
+
+        create_topic_stubs(tmp_path, [_proposal("t-opic", ["T"])])
+
+        assert hashlib.sha256(note.read_bytes()).hexdigest() == before
+
+    def test_post_write_self_check_rolls_back_on_collision(self, tmp_path: Path) -> None:
+        d = tmp_path / "wiki" / "topics"
+        d.mkdir(parents=True)
+        (d / "aaa.md").write_text(
+            "---\ntype: topic\nslug: aaa\naliases: [Shared]\nstatus: active\n---\n",
+            encoding="utf-8",
+        )
+        # Bypass resolve_collisions: a colliding stub reaches the writer.
+        res = create_topic_stubs(tmp_path, [_proposal("zzz", ["Shared"])])
+
+        assert not (d / "zzz.md").exists()  # rolled back
+        assert [p.slug for p in res.rolled_back] == ["zzz"]
+        assert any(t.slug == "aaa" for t in load_topics(tmp_path))  # vault still loads

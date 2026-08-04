@@ -16,12 +16,14 @@ import hashlib
 import math
 import re
 import sys
+import time as _time
 import unicodedata
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 from itertools import combinations
 from pathlib import Path
 
+import yaml
 from pydantic import BaseModel
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -40,7 +42,13 @@ from scripts.classify.structured_output import (
     StructuredOutputError,
     generate_structured,
 )
-from scripts.classify.topics import Topic, load_topics, slugify, validate
+from scripts.classify.topics import (
+    Topic,
+    load_topic_report,
+    load_topics,
+    slugify,
+    validate,
+)
 
 _SMART_APOSTROPHES = str.maketrans({"’": "'", "‘": "'", "‛": "'", "`": "'"})
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -570,3 +578,97 @@ def resolve_collisions(
         accepted.append(replace(proposal, aliases=tuple(survivors)))
 
     return accepted, rejected
+
+
+# --- auto-create write + self-check + rollback (Unit 5) --------------------
+
+_SAFE_SLUG_RE = re.compile(r"^[a-z0-9-]+$")
+_WRITE_SLEEP_SECONDS = 0.05  # iCloud inter-write throttle (matches topic_backlinks)
+
+
+@dataclass(frozen=True)
+class CreateResult:
+    created: list[TopicProposal]
+    skipped: list[TopicProposal]  # slug already exists / unsafe slug
+    would_create: list[TopicProposal]  # dry-run only
+    rolled_back: list[TopicProposal]  # written then self-check failed
+
+
+def _stub_text(proposal: TopicProposal) -> str:
+    front = {
+        "type": "topic",
+        "slug": proposal.slug,
+        "aliases": list(proposal.aliases),
+        "status": "active",
+        "auto_created": True,
+    }
+    yaml_block = yaml.safe_dump(
+        front, sort_keys=False, allow_unicode=True, default_flow_style=None
+    )
+    body = f"# {proposal.name}\n\n{proposal.description}\n"
+    return f"---\n{yaml_block}---\n\n{body}"
+
+
+def _atomic_write_stub(target: Path, proposal: TopicProposal) -> None:
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(_stub_text(proposal), encoding="utf-8")
+    tmp.replace(target)
+
+
+def create_topic_stubs(
+    vault: Path, proposals: list[TopicProposal], *, dry_run: bool = False
+) -> CreateResult:
+    """Write high-confidence proposals as ``status: active`` topic stubs.
+
+    Additive-only (never touches source notes), atomic per file, slug-sanitised
+    and path-allowlisted to ``wiki/topics/``, never overwriting an existing
+    slug. After writing, re-loads the vault; if any just-written stub fails to
+    load (quarantined — e.g. a collision that slipped through), the whole batch
+    is rolled back so the vault is always left loadable.
+    """
+    topics_dir = (vault / "wiki" / "topics").resolve()
+    to_write: list[tuple[TopicProposal, Path]] = []
+    skipped: list[TopicProposal] = []
+
+    for proposal in proposals:
+        if not _SAFE_SLUG_RE.match(proposal.slug):
+            skipped.append(proposal)
+            continue
+        target = topics_dir / f"{proposal.slug}.md"
+        if target.parent != topics_dir:  # belt-and-suspenders vs traversal
+            skipped.append(proposal)
+            continue
+        if target.exists():  # never overwrite — slug is the idempotency key
+            skipped.append(proposal)
+            continue
+        to_write.append((proposal, target))
+
+    if dry_run:
+        return CreateResult(
+            created=[], skipped=skipped,
+            would_create=[p for p, _ in to_write], rolled_back=[],
+        )
+
+    written: list[Path] = []
+    for index, (proposal, target) in enumerate(to_write):
+        if index:
+            _time.sleep(_WRITE_SLEEP_SECONDS)
+        topics_dir.mkdir(parents=True, exist_ok=True)
+        _atomic_write_stub(target, proposal)
+        written.append(target)
+
+    # Post-write self-check: every written slug must load cleanly.
+    good_slugs = {topic.slug for topic in load_topic_report(vault).topics}
+    written_slugs = {proposal.slug for proposal, _ in to_write}
+    if written_slugs - good_slugs:
+        for path in written:
+            path.unlink(missing_ok=True)
+        return CreateResult(
+            created=[], skipped=skipped, would_create=[],
+            rolled_back=[p for p, _ in to_write],
+        )
+
+    return CreateResult(
+        created=[p for p, _ in to_write], skipped=skipped,
+        would_create=[], rolled_back=[],
+    )
