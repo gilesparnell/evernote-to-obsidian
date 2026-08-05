@@ -5,6 +5,7 @@ Unit 1: gather notes matching no registered topic (recency-windowed, deduped).
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import hashlib
@@ -26,6 +27,7 @@ from scripts.classify.topic_proposer import (
     propose_topic_metadata,
     release_ledger_lock,
     save_ledger,
+    propose_topics,
     update_ledger,
     resolve_collisions,
     score_cluster,
@@ -607,3 +609,52 @@ class TestLedger:
         assert acquire_ledger_lock(tmp_path, now=now) is False  # held
         release_ledger_lock(tmp_path)
         assert acquire_ledger_lock(tmp_path, now=now) is True  # released
+
+
+class TestProposeTopics:
+    def test_undeclared_cluster_becomes_a_proposal(self, tmp_path: Path) -> None:
+        vault = tmp_path / "Personal"
+        (vault / "wiki" / "topics").mkdir(parents=True)
+        for i in range(3):
+            _note(vault, f"connor{i}.md", body=f"homework lying school day{i}",
+                  people=["Connor"])
+        json_out = tmp_path / ".cache"
+        state = tmp_path / ".state"
+
+        summary = propose_topics(
+            vault=vault, json_out=json_out, state_dir=state,
+            lm_available=False, full=True, now=datetime(2026, 8, 5, tzinfo=AEST),
+        )
+
+        assert summary.auto_created == ()  # auto disabled by default
+        assert len(summary.proposed) >= 1
+        art = json.loads((json_out / "Personal-_proposer.json").read_text())
+        assert any("connor" in p["slug"].lower() for p in art["proposed"])
+
+    def test_lock_held_skips_the_run(self, tmp_path: Path) -> None:
+        state = tmp_path / ".state"
+        acquire_ledger_lock(state, now=datetime(2026, 8, 5, 23, tzinfo=AEST))
+        vault = tmp_path / "Personal"
+        (vault / "wiki" / "topics").mkdir(parents=True)
+
+        summary = propose_topics(
+            vault=vault, json_out=tmp_path / ".c", state_dir=state,
+            lm_available=False, now=datetime(2026, 8, 5, 23, tzinfo=AEST),
+        )
+
+        assert summary.skipped_lock is True
+
+    def test_dry_run_persists_no_ledger_or_stubs(self, tmp_path: Path) -> None:
+        vault = tmp_path / "Personal"
+        (vault / "wiki" / "topics").mkdir(parents=True)
+        for i in range(3):
+            _note(vault, f"c{i}.md", body=f"homework lying day{i}", people=["Connor"])
+
+        propose_topics(
+            vault=vault, json_out=tmp_path / ".c", state_dir=tmp_path / ".s",
+            lm_available=False, full=True, dry_run=True,
+            now=datetime(2026, 8, 5, tzinfo=AEST),
+        )
+
+        assert not (tmp_path / ".s" / "Personal-_proposer_ledger.json").exists()
+        assert list((vault / "wiki" / "topics").glob("*.md")) == []

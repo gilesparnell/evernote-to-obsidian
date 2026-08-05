@@ -38,7 +38,7 @@ from scripts.classify.collect_topic import (
     iter_source_notes,
 )
 from scripts.classify.frontmatter import read_frontmatter
-from scripts.classify.lm_classifier import LM_STUDIO_MODEL
+from scripts.classify.lm_classifier import LM_STUDIO_MODEL, _get_client
 from scripts.classify.structured_output import (
     StructuredOutputError,
     generate_structured,
@@ -851,3 +851,147 @@ def acquire_ledger_lock(state_dir: Path, *, now: datetime, max_age_seconds: int 
 
 def release_ledger_lock(state_dir: Path) -> None:
     (state_dir / "_proposer.lock").unlink(missing_ok=True)
+
+
+# --- top-level orchestration (Unit 7) --------------------------------------
+
+@dataclass(frozen=True)
+class ProposeSummary:
+    auto_created: tuple[str, ...]
+    proposed: tuple[str, ...]
+    ledgered: int
+    promoted: tuple[str, ...]
+    rolled_back: tuple[str, ...]
+    skipped_lock: bool = False
+
+    def detail(self) -> str:
+        if self.skipped_lock:
+            return "skipped (locked)"
+        return (
+            f"{len(self.auto_created)} auto-created, {len(self.proposed)} proposed, "
+            f"{self.ledgered} ledgered"
+        )
+
+
+def proposer_artifact_path(vault: Path, json_out: Path) -> Path:
+    return json_out / f"{vault.name}-_proposer.json"
+
+
+def _proposal_record(proposal: TopicProposal) -> dict:
+    return {
+        "slug": proposal.slug,
+        "name": proposal.name,
+        "aliases": list(proposal.aliases),
+        "description": proposal.description,
+        "note_count": len(proposal.cluster.members),
+        "members": [m.rel for m in proposal.cluster.members],
+        "source": proposal.source,
+    }
+
+
+def _write_proposer_artifact(
+    vault: Path,
+    json_out: Path,
+    *,
+    now_iso: str,
+    created: list[TopicProposal],
+    proposals: list[TopicProposal],
+    ledger: dict[str, LedgerEntry],
+    promoted: list[LedgerEntry],
+) -> None:
+    json_out.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "generated_at": now_iso,
+        "auto_created": [
+            {"slug": p.slug, "name": p.name, "note_count": len(p.cluster.members)}
+            for p in created
+        ],
+        "proposed": [_proposal_record(p) for p in proposals],
+        "ledger_count": len(ledger),
+        "promoted": [{"key": e.key, "name": _anchor_label(e.key)} for e in promoted],
+    }
+    path = proposer_artifact_path(vault, json_out)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def propose_topics(
+    *,
+    vault: Path,
+    json_out: Path,
+    state_dir: Path,
+    lm_available: bool,
+    client: object | None = None,
+    dry_run: bool = False,
+    full: bool = False,
+    now: datetime | None = None,
+    config: ProposerConfig | None = None,
+) -> ProposeSummary:
+    """Run the full U6 pipeline for one vault: gather → cluster → score → route
+    → (auto-create | propose | ledger), persisting a JSON artifact the gardener
+    renders. Auto-create requires an LLM-sourced name; when the LM is down those
+    clusters downgrade to proposals."""
+    cfg = config or ProposerConfig()
+    now = _as_aware(now) if now is not None else datetime.now().astimezone()
+
+    if not acquire_ledger_lock(state_dir, now=now):
+        return ProposeSummary((), (), 0, (), (), skipped_lock=True)
+
+    try:
+        notes = gather_unregistered_notes(
+            vault, recency_days=cfg.recency_days, full=full, now=now
+        )
+        clusters = cluster_notes(
+            notes, min_size=cfg.min_cluster_size, min_density=cfg.min_density
+        )
+        routing = classify_clusters(clusters, cfg)
+
+        if lm_available and client is None:
+            client = _get_client()
+
+        auto_meta = [
+            propose_topic_metadata(sc.cluster, client, lm_available=lm_available)
+            for sc in routing.auto
+        ]
+        auto_llm = [m for m in auto_meta if m.source == "llm"]
+        auto_downgraded = [m for m in auto_meta if m.source != "llm"]
+        propose_meta = [
+            propose_topic_metadata(sc.cluster, client, lm_available=lm_available)
+            for sc in routing.propose
+        ]
+
+        existing = load_topics(vault)
+        accepted_auto, rejected_auto = resolve_collisions(auto_llm, existing)
+        create = create_topic_stubs(vault, accepted_auto, dry_run=dry_run)
+
+        # Anything not auto-created is surfaced as a proposal for the operator.
+        proposals = (
+            propose_meta + auto_downgraded + rejected_auto + list(create.rolled_back)
+        )
+
+        led_path = ledger_path(vault, state_dir)
+        ledger, promoted = update_ledger(
+            load_ledger(led_path), routing.ledger, now=now, config=cfg
+        )
+        if not dry_run:
+            save_ledger(led_path, ledger)
+
+        _write_proposer_artifact(
+            vault, json_out,
+            now_iso=now.isoformat(),
+            created=list(create.created),
+            proposals=proposals,
+            ledger=ledger,
+            promoted=promoted,
+        )
+
+        return ProposeSummary(
+            auto_created=tuple(p.slug for p in create.created),
+            proposed=tuple(p.slug for p in proposals),
+            ledgered=len(routing.ledger),
+            promoted=tuple(e.key for e in promoted),
+            rolled_back=tuple(p.slug for p in create.rolled_back),
+        )
+    finally:
+        release_ledger_lock(state_dir)

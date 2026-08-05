@@ -16,7 +16,8 @@ if str(_REPO_ROOT) not in sys.path:
 
 from scripts.classify.classify_vault import _iter_md_files
 from scripts.classify.frontmatter import is_classified, read_frontmatter
-from scripts.classify.topics import load_topics
+from scripts.classify.topic_proposer import proposer_artifact_path
+from scripts.classify.topics import load_topic_report, load_topics
 from scripts.classify.wiki_io import replace_generated_region
 
 
@@ -57,6 +58,10 @@ class _TopicFreshness:
 def build_report(*, vaults: list[Path], run_state: dict, json_out: Path) -> str:
     """Return the generated markdown body for the rolling gardener report."""
     metrics = [_vault_metrics(vault) for vault in vaults]
+    proposer = [
+        (vault.name, _read_json(proposer_artifact_path(vault, json_out)))
+        for vault in vaults
+    ]
     freshness = [
         row
         for vault in vaults
@@ -111,9 +116,23 @@ def build_report(*, vaults: list[Path], run_state: dict, json_out: Path) -> str:
         "|---|---|---:|---|---|",
         *[_freshness_row(row) for row in freshness],
         "",
+        "## Auto-created",
+        "",
+        *_auto_created_lines(proposer),
+        "",
         "## Proposals",
         "",
-        "Topic proposer is pending U6.",
+        *_proposal_lines(proposer),
+        "",
+        "## Ledger",
+        "",
+        "| Vault | Tracked | Promoted this run |",
+        "|---|---:|---|",
+        *[_ledger_row(name, data) for name, data in proposer],
+        "",
+        "## Quarantine",
+        "",
+        *_quarantine_lines(vaults, run_state),
     ]
     return "\n".join(parts).rstrip() + "\n"
 
@@ -316,6 +335,90 @@ def _exhaust_lines(metrics: list[_VaultMetrics]) -> list[str]:
             for path in item.exhaust_files:
                 lines.append(f"- {item.name}: [{path.name}]({path.as_uri()})")
     return lines
+
+
+def _list_field(data: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    value = data.get(key)
+    if not isinstance(value, list):
+        return []
+    return [entry for entry in value if isinstance(entry, dict)]
+
+
+def _auto_created_lines(proposer: list[tuple[str, dict[str, Any]]]) -> list[str]:
+    lines = [
+        f"- {name}: [[{_display(entry.get('slug'))}]] — {_display(entry.get('name'))} "
+        f"({_display(entry.get('note_count'))} notes)"
+        for name, data in proposer
+        for entry in _list_field(data, "auto_created")
+    ]
+    return lines or ["None auto-created this run."]
+
+
+def _proposal_lines(proposer: list[tuple[str, dict[str, Any]]]) -> list[str]:
+    rows = [
+        _proposal_row(name, entry)
+        for name, data in proposer
+        for entry in _list_field(data, "proposed")
+    ]
+    if not rows:
+        return ["No proposals this run."]
+    return [
+        "| Vault | Slug | Name | Notes | Aliases | Description |",
+        "|---|---|---|---:|---|---|",
+        *rows,
+    ]
+
+
+def _proposal_row(vault_name: str, entry: dict[str, Any]) -> str:
+    aliases = entry.get("aliases")
+    alias_text = ", ".join(str(a) for a in aliases) if isinstance(aliases, list) else ""
+    return (
+        f"| {vault_name} | {_display(entry.get('slug'))} | {_display(entry.get('name'))} | "
+        f"{_display(entry.get('note_count'))} | {_display(alias_text)} | "
+        f"{_display(entry.get('description'))} |"
+    )
+
+
+def _ledger_row(vault_name: str, data: dict[str, Any]) -> str:
+    promoted = ", ".join(
+        _display(entry.get("name") or entry.get("key"))
+        for entry in _list_field(data, "promoted")
+    )
+    return f"| {vault_name} | {_display(data.get('ledger_count', 0))} | {_display(promoted)} |"
+
+
+def _quarantine_lines(vaults: list[Path], run_state: dict) -> list[str]:
+    """Everything the topic reader refused plus everything the pre-flight swept.
+
+    Flag-only: a quarantined file is never deleted, so the operator can tell a
+    hand-edit typo from an iCloud conflict copy before anything is lost.
+    """
+    swept = run_state.get("topic_conflicts_swept")
+    swept_paths = [str(item) for item in swept] if isinstance(swept, list) else []
+
+    lines: list[str] = []
+    for vault in vaults:
+        entries = [
+            f"{_vault_relative(vault, record.path)} — {record.reason}"
+            for record in load_topic_report(vault).quarantined
+        ]
+        entries += [
+            f"swept conflict copy: {Path(raw).name}"
+            for raw in swept_paths
+            if vault.name in Path(raw).parts
+        ]
+        if not entries:
+            lines.append(f"- {vault.name}: none")
+        else:
+            lines.extend(f"- {vault.name}: {entry}" for entry in entries)
+    return lines
+
+
+def _vault_relative(vault: Path, path: Path) -> str:
+    try:
+        return path.relative_to(vault).as_posix()
+    except ValueError:
+        return path.name
 
 
 def _freshness_row(row: _TopicFreshness) -> str:
