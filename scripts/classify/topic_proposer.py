@@ -45,6 +45,7 @@ from scripts.classify.structured_output import (
 )
 from scripts.classify.topics import (
     Topic,
+    load_rejected_slugs,
     load_topic_report,
     load_topics,
     slugify,
@@ -929,7 +930,7 @@ def propose_topics(
     config: ProposerConfig | None = None,
 ) -> ProposeSummary:
     """Run the full U6 pipeline for one vault: gather → cluster → score → route
-    → (auto-create | propose | ledger), persisting a JSON artifact the gardener
+    → (auto-create | propose | ledger), persisting a JSON artefact the gardener
     renders. Auto-create requires an LLM-sourced name; when the LM is down those
     clusters downgrade to proposals."""
     cfg = config or ProposerConfig()
@@ -954,11 +955,19 @@ def propose_topics(
             propose_topic_metadata(sc.cluster, client, lm_available=lm_available)
             for sc in routing.auto
         ]
+        # A tombstoned slug is the operator's "no". Drop it before naming turns
+        # into a write or a report line — otherwise the same cluster is
+        # re-detected and re-nagged every single night.
+        rejected = load_rejected_slugs(vault)
+        auto_meta = [m for m in auto_meta if m.slug not in rejected]
         auto_llm = [m for m in auto_meta if m.source == "llm"]
         auto_downgraded = [m for m in auto_meta if m.source != "llm"]
         propose_meta = [
-            propose_topic_metadata(sc.cluster, client, lm_available=lm_available)
+            meta
             for sc in routing.propose
+            if (meta := propose_topic_metadata(
+                sc.cluster, client, lm_available=lm_available
+            )).slug not in rejected
         ]
 
         existing = load_topics(vault)

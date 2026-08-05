@@ -13,6 +13,7 @@ import pytest
 from scripts.classify.topics import (
     QuarantinedTopic,
     Topic,
+    load_rejected_slugs,
     load_topic_report,
     load_topics,
     slugify,
@@ -269,3 +270,44 @@ class TestFailSoftLoad:
         assert record.path == bad
         assert isinstance(record.reason, str) and record.reason
 
+
+
+class TestRejectedTombstones:
+    """The reject ritual is a tombstone, never a raw delete: the file stays so
+    existing backlinks keep resolving, but the topic leaves the active set."""
+
+    def test_rejected_stubs_are_skipped_like_paused(self, tmp_path: Path) -> None:
+        _write_topic_stub(tmp_path, "keeper.md", aliases="[Keeper]")
+        _write_topic_stub(
+            tmp_path, "wrong-topic.md", aliases="[Wrong topic]", status="rejected"
+        )
+
+        topics = load_topics(tmp_path)
+
+        assert [topic.slug for topic in topics] == ["keeper"]
+
+    def test_rejected_stub_is_not_quarantined(self, tmp_path: Path) -> None:
+        _write_topic_stub(tmp_path, "wrong-topic.md", status="rejected")
+
+        assert load_topic_report(tmp_path).quarantined == []
+
+    def test_load_rejected_slugs_returns_only_tombstones(self, tmp_path: Path) -> None:
+        _write_topic_stub(tmp_path, "active-topic.md", aliases="[Active]")
+        _write_topic_stub(tmp_path, "paused-topic.md", aliases="[Paused]", status="paused")
+        _write_topic_stub(tmp_path, "rejected-topic.md", aliases="[Rejected]", status="rejected")
+
+        assert load_rejected_slugs(tmp_path) == {"rejected-topic"}
+
+    def test_load_rejected_slugs_on_a_vault_with_no_topics_dir(self, tmp_path: Path) -> None:
+        assert load_rejected_slugs(tmp_path) == set()
+
+    def test_rejected_alias_does_not_block_a_live_topic(self, tmp_path: Path) -> None:
+        """A tombstone must not keep hogging its aliases — the alias-collision
+        check only applies to the active set."""
+        _write_topic_stub(tmp_path, "alpha.md", aliases="[Shared alias]")
+        _write_topic_stub(tmp_path, "zeta.md", aliases="[Shared alias]", status="rejected")
+
+        report = load_topic_report(tmp_path)
+
+        assert [topic.slug for topic in report.topics] == ["alpha"]
+        assert report.quarantined == []

@@ -658,3 +658,67 @@ class TestProposeTopics:
 
         assert not (tmp_path / ".s" / "Personal-_proposer_ledger.json").exists()
         assert list((vault / "wiki" / "topics").glob("*.md")) == []
+
+
+class TestRejectedTombstones:
+    """Unit 8: rejecting a wrong topic must stick. The tombstone is the memory —
+    without it the proposer re-detects the same cluster and re-nags forever."""
+
+    def _reject(self, vault: Path, slug: str) -> None:
+        path = vault / "wiki" / "topics" / f"{slug}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f"---\ntype: topic\nslug: {slug}\naliases: []\nstatus: rejected\n---\n\n"
+            f"# {slug}\n",
+            encoding="utf-8",
+        )
+
+    def test_rejected_slug_is_never_proposed_again(self, tmp_path: Path) -> None:
+        vault = tmp_path / "Personal"
+        (vault / "wiki" / "topics").mkdir(parents=True)
+        for i in range(4):
+            _note(vault, f"connor{i}.md", body=f"homework lying school day{i}",
+                  people=["Connor"])
+        kwargs = dict(
+            vault=vault, json_out=tmp_path / ".c", state_dir=tmp_path / ".s",
+            lm_available=False, full=True, now=datetime(2026, 8, 5, tzinfo=AEST),
+        )
+
+        first = propose_topics(**kwargs)
+        assert first.proposed  # sanity: there is something to reject
+        for slug in first.proposed:
+            self._reject(vault, slug)
+
+        second = propose_topics(**kwargs)
+
+        assert second.proposed == ()
+
+    def test_rejected_slug_is_never_auto_created_again(self, tmp_path: Path) -> None:
+        vault = tmp_path / "Personal"
+        (vault / "wiki" / "topics").mkdir(parents=True)
+        self._reject(vault, "connor")
+        before = (vault / "wiki" / "topics" / "connor.md").read_text(encoding="utf-8")
+        proposal = _proposal("connor", ["Connor"])
+
+        result = create_topic_stubs(vault, [proposal])
+
+        assert result.created == []
+        assert [p.slug for p in result.skipped] == ["connor"]
+        assert (vault / "wiki" / "topics" / "connor.md").read_text(encoding="utf-8") == before
+
+    def test_a_different_theme_still_proposes_alongside_a_tombstone(
+        self, tmp_path: Path
+    ) -> None:
+        vault = tmp_path / "Personal"
+        (vault / "wiki" / "topics").mkdir(parents=True)
+        self._reject(vault, "connor")
+        for i in range(4):
+            _note(vault, f"lisa{i}.md", body=f"budget spreadsheet review day{i}",
+                  people=["Lisa"])
+
+        summary = propose_topics(
+            vault=vault, json_out=tmp_path / ".c", state_dir=tmp_path / ".s",
+            lm_available=False, full=True, now=datetime(2026, 8, 5, tzinfo=AEST),
+        )
+
+        assert any("lisa" in slug for slug in summary.proposed)

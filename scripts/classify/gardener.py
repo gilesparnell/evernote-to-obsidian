@@ -44,6 +44,7 @@ class _VaultMetrics:
     orphan_count: int
     review_queue_count: int
     exhaust_files: list[Path]
+    dangling_refs: list[tuple[str, str]]  # (note path relative to vault, missing slug)
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,10 @@ def build_report(*, vaults: list[Path], run_state: dict, json_out: Path) -> str:
         "## Quarantine",
         "",
         *_quarantine_lines(vaults, run_state),
+        "",
+        "## Dangling refs",
+        "",
+        *_dangling_lines(metrics),
     ]
     return "\n".join(parts).rstrip() + "\n"
 
@@ -182,15 +187,17 @@ def _vault_metrics(vault: Path) -> _VaultMetrics:
     classified = sum(1 for path in files if _safe_is_classified(path))
     total = len(files)
     unclassified = total - classified
+    orphans, dangling = _scan_note_links(vault, files)
     return _VaultMetrics(
         name=vault.name,
         classified=classified,
         total=total,
         coverage_ratio=classified / total if total else 1.0,
         unclassified=unclassified,
-        orphan_count=_orphan_count(vault, files),
+        orphan_count=orphans,
         review_queue_count=review_queue_count(vault),
         exhaust_files=_exhaust_files(vault),
+        dangling_refs=dangling,
     )
 
 
@@ -201,16 +208,51 @@ def _safe_is_classified(path: Path) -> bool:
         return False
 
 
-def _orphan_count(vault: Path, files: list[Path]) -> int:
+def _scan_note_links(
+    vault: Path, files: list[Path]
+) -> tuple[int, list[tuple[str, str]]]:
+    """One frontmatter pass for both link health checks — orphaned ``up:``
+    parents and ``topics:`` refs whose topic file is gone."""
+    topics_dir = vault / "wiki" / "topics"
     orphans = 0
+    dangling: list[tuple[str, str]] = []
+
     for path in files:
         fm = read_frontmatter(path)
         up = fm.get("up")
-        if not isinstance(up, str) or not up.strip():
-            continue
-        if not _up_target_exists(vault=vault, current=path, up=up.strip()):
+        if (
+            isinstance(up, str)
+            and up.strip()
+            and not _up_target_exists(vault=vault, current=path, up=up.strip())
+        ):
             orphans += 1
-    return orphans
+        for slug in _topic_ref_slugs(fm.get("topics")):
+            if not (topics_dir / f"{slug}.md").exists():
+                dangling.append((path.relative_to(vault).as_posix(), slug))
+
+    return orphans, dangling
+
+
+def _topic_ref_slugs(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    slugs = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        text = item.strip()
+        if text.startswith("[[") and text.endswith("]]"):
+            text = text[2:-2]
+        text = text.split("|", 1)[0].split("#", 1)[0].strip()
+        if text.endswith(".md"):
+            text = text[:-3]
+        if text:
+            slugs.append(text)
+    return slugs
+
+
+def _orphan_count(vault: Path, files: list[Path]) -> int:
+    return _scan_note_links(vault, files)[0]
 
 
 def _up_target_exists(*, vault: Path, current: Path, up: str) -> bool:
@@ -411,6 +453,23 @@ def _quarantine_lines(vaults: list[Path], run_state: dict) -> list[str]:
             lines.append(f"- {vault.name}: none")
         else:
             lines.extend(f"- {vault.name}: {entry}" for entry in entries)
+    return lines
+
+
+def _dangling_lines(metrics: list[_VaultMetrics]) -> list[str]:
+    """FLAG only — never prune. A missing topic file is indistinguishable from
+    an iCloud placeholder or a mid-sync gap, and pruning would edit source notes
+    to "fix" a file that is about to come back."""
+    lines: list[str] = []
+    for item in metrics:
+        if not item.dangling_refs:
+            lines.append(f"- {item.name}: none")
+            continue
+        lines.extend(
+            f"- {item.name}: [[{slug}]] referenced by {rel} — no topic file "
+            f"(flagged, nothing pruned)"
+            for rel, slug in item.dangling_refs
+        )
     return lines
 
 

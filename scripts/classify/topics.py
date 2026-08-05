@@ -44,6 +44,10 @@ class TopicLoad:
     quarantined: list[QuarantinedTopic]
 
 
+# Statuses that keep the file on disc but take the topic out of the active set:
+# `paused` is a temporary hold, `rejected` is the tombstone left by the reject
+# ritual (see load_rejected_slugs).
+_INACTIVE_STATUSES = frozenset({"paused", "rejected"})
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 
@@ -98,6 +102,32 @@ def load_topic_report(vault: Path) -> TopicLoad:
     return TopicLoad(topics=topics, quarantined=quarantined)
 
 
+def load_rejected_slugs(vault: Path) -> set[str]:
+    """Slugs the operator has tombstoned with ``status: rejected``.
+
+    The tombstone file stays on disc deliberately: a raw delete would leave
+    every ``topics: [[slug]]`` backlink dangling, and clicking one in Obsidian
+    creates an empty note (the "zeroed notes" incident). Keeping the file means
+    the link still resolves, and this set is how the proposer remembers never to
+    re-create or re-propose the topic.
+    """
+    topics_dir = vault / "wiki" / "topics"
+    if not topics_dir.exists():
+        return set()
+
+    rejected: set[str] = set()
+    for path in sorted(topics_dir.glob("*.md")):
+        try:
+            fm = _read_topic_frontmatter(path)
+        except ValueError:
+            continue  # malformed files are the quarantine path's problem
+        if fm.get("type") != "topic" or fm.get("status") != "rejected":
+            continue
+        slug = fm.get("slug")
+        rejected.add(slug if isinstance(slug, str) and slug else path.stem)
+    return rejected
+
+
 def _parse_topic(path: Path) -> tuple[Topic | None, str | None]:
     """Parse one topic file. Returns (topic, None) on success, (None, None) to
     skip (not a topic / paused), or (None, reason) to quarantine."""
@@ -127,7 +157,7 @@ def _parse_topic(path: Path) -> tuple[Topic | None, str | None]:
         return None, "exclude must be a list of strings"
 
     status = fm.get("status", "active")
-    if status == "paused":
+    if status in _INACTIVE_STATUSES:
         return None, None
 
     return (
