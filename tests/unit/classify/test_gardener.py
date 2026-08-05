@@ -322,3 +322,235 @@ class TestLMStudioRow:
             json_out=tmp_path,
         )
         assert "| LM Studio | available (google/gemma-4-e4b) |" in up
+
+
+class TestGardenerProposerSections:
+    """U6 Unit 7: the report is the only surface the operator reads, so every
+    proposer outcome — created, proposed, ledgered, quarantined — lands here."""
+
+    def _artifact(self, json_out: Path, vault: Path, **payload) -> None:
+        base = {
+            "generated_at": "2026-08-05T21:00:00+10:00",
+            "auto_created": [],
+            "proposed": [],
+            "ledger_count": 0,
+            "promoted": [],
+        }
+        base.update(payload)
+        _write(json_out / f"{vault.name}-_proposer.json", json.dumps(base, indent=2) + "\n")
+
+    def test_proposals_section_lists_each_proposed_topic(
+        self, gardener, vault: Path, tmp_path: Path
+    ) -> None:
+        self._artifact(
+            tmp_path,
+            vault,
+            proposed=[
+                {
+                    "slug": "school-lying",
+                    "name": "School lying",
+                    "aliases": ["lying at school", "Connor lying"],
+                    "description": "Recurring lying incidents at school.",
+                    "note_count": 4,
+                    "members": ["a.md", "b.md"],
+                    "source": "llm",
+                }
+            ],
+        )
+
+        report = gardener.build_report(
+            vaults=[vault], run_state={"complete": True, "steps": {}}, json_out=tmp_path
+        )
+
+        assert "## Proposals" in report
+        assert "Topic proposer is pending U6." not in report
+        assert "| Personal | school-lying | School lying | 4 |" in report
+        assert "lying at school" in report
+        assert "Recurring lying incidents at school." in report
+
+    def test_auto_created_section_links_created_topics(
+        self, gardener, vault: Path, tmp_path: Path
+    ) -> None:
+        self._artifact(
+            tmp_path,
+            vault,
+            auto_created=[{"slug": "school-lying", "name": "School lying", "note_count": 6}],
+        )
+
+        report = gardener.build_report(
+            vaults=[vault], run_state={"complete": True, "steps": {}}, json_out=tmp_path
+        )
+
+        assert "## Auto-created" in report
+        assert "- Personal: [[school-lying]] — School lying (6 notes)" in report
+
+    def test_ledger_row_reports_tracked_count_and_promotions(
+        self, gardener, vault: Path, tmp_path: Path
+    ) -> None:
+        self._artifact(
+            tmp_path,
+            vault,
+            ledger_count=7,
+            promoted=[{"key": "person:connor", "name": "Connor"}],
+        )
+
+        report = gardener.build_report(
+            vaults=[vault], run_state={"complete": True, "steps": {}}, json_out=tmp_path
+        )
+
+        assert "## Ledger" in report
+        assert "| Personal | 7 | Connor |" in report
+
+    def test_empty_artifact_renders_explicit_nothing_not_a_blank_section(
+        self, gardener, vault: Path, tmp_path: Path
+    ) -> None:
+        self._artifact(tmp_path, vault)
+
+        report = gardener.build_report(
+            vaults=[vault], run_state={"complete": True, "steps": {}}, json_out=tmp_path
+        )
+
+        assert "No proposals this run." in report
+        assert "None auto-created this run." in report
+
+    def test_missing_or_corrupt_artifact_never_crashes_the_report(
+        self, gardener, vault: Path, tmp_path: Path
+    ) -> None:
+        missing = gardener.build_report(
+            vaults=[vault], run_state={"complete": True, "steps": {}}, json_out=tmp_path
+        )
+        _write(tmp_path / f"{vault.name}-_proposer.json", "{not json")
+        corrupt = gardener.build_report(
+            vaults=[vault], run_state={"complete": True, "steps": {}}, json_out=tmp_path
+        )
+
+        assert "No proposals this run." in missing
+        assert "No proposals this run." in corrupt
+
+    def test_quarantine_section_flags_an_unloadable_topic_file(
+        self, gardener, vault: Path, tmp_path: Path
+    ) -> None:
+        bad = vault / "wiki" / "topics" / "broken.md"
+        _write(
+            bad,
+            "---\ntype: topic\nslug: not-broken\naliases: [x]\nstatus: active\n---\n",
+        )
+
+        report = gardener.build_report(
+            vaults=[vault], run_state={"complete": True, "steps": {}}, json_out=tmp_path
+        )
+
+        assert "## Quarantine" in report
+        assert "broken.md" in report
+        assert "not-broken" in report
+
+    def test_quarantine_section_lists_swept_conflict_copies(
+        self, gardener, vault: Path, tmp_path: Path
+    ) -> None:
+        report = gardener.build_report(
+            vaults=[vault],
+            run_state={
+                "complete": True,
+                "steps": {},
+                "topic_conflicts_swept": ["Personal/wiki/topics/julie-finances 2.md"],
+            },
+            json_out=tmp_path,
+        )
+
+        assert "julie-finances 2.md" in report
+
+    def test_clean_vault_reports_no_quarantine(
+        self, gardener, business_vault: Path, tmp_path: Path
+    ) -> None:
+        report = gardener.build_report(
+            vaults=[business_vault], run_state={"complete": True, "steps": {}}, json_out=tmp_path
+        )
+
+        quarantine = report.split("## Quarantine", 1)[1]
+        assert "- Business: none" in quarantine
+
+    def test_gardener_report_is_never_visible_to_the_proposer(self, gardener, vault: Path) -> None:
+        """R-7: the report must not become a source note the proposer clusters
+        on, or the chain feeds on its own exhaust."""
+        from scripts.classify.collect_topic import iter_source_notes
+
+        gardener.write_report(vault=vault, report_md="# Gardener\n\nsome proposal text\n")
+
+        assert (vault / "wiki" / "gardener.md").exists()
+        assert not [p for p in iter_source_notes(vault) if p.name == "gardener.md"]
+
+
+class TestGardenerDanglingRefs:
+    """R-2: a raw-deleted topic leaves `topics: [[slug]]` refs pointing at
+    nothing, and clicking one in Obsidian creates an empty note — the exact
+    "zeroed notes" incident. The gardener FLAGS them and never prunes: it can't
+    tell a deliberate delete from an iCloud placeholder or a mid-sync gap."""
+
+    def test_ref_with_no_topic_file_is_flagged(
+        self, gardener, business_vault: Path, tmp_path: Path
+    ) -> None:
+        _write(
+            business_vault / "Meeting note.md",
+            '---\ntype: note\ntopics: ["[[ghost-topic]]"]\n---\n\nbody\n',
+        )
+
+        report = gardener.build_report(
+            vaults=[business_vault], run_state={"complete": True, "steps": {}}, json_out=tmp_path
+        )
+
+        section = report.split("## Dangling refs", 1)[1]
+        assert "ghost-topic" in section
+        assert "Meeting note.md" in section
+
+    def test_nothing_is_pruned_when_a_ref_dangles(
+        self, gardener, business_vault: Path, tmp_path: Path
+    ) -> None:
+        note = business_vault / "Meeting note.md"
+        _write(note, '---\ntype: note\ntopics: ["[[ghost-topic]]"]\n---\n\nbody\n')
+        before = _snapshot_tree(business_vault)
+
+        gardener.build_report(
+            vaults=[business_vault], run_state={"complete": True, "steps": {}}, json_out=tmp_path
+        )
+
+        assert _snapshot_tree(business_vault) == before
+
+    def test_a_rejected_tombstone_is_not_dangling(
+        self, gardener, business_vault: Path, tmp_path: Path
+    ) -> None:
+        """The tombstone file still exists, so the backlink still resolves."""
+        _write(
+            business_vault / "wiki" / "topics" / "wrong-topic.md",
+            "---\ntype: topic\nslug: wrong-topic\naliases: [x]\nstatus: rejected\n---\n",
+        )
+        _write(
+            business_vault / "Meeting note.md",
+            '---\ntype: note\ntopics: ["[[wrong-topic]]"]\n---\n\nbody\n',
+        )
+
+        report = gardener.build_report(
+            vaults=[business_vault], run_state={"complete": True, "steps": {}}, json_out=tmp_path
+        )
+
+        section = report.split("## Dangling refs", 1)[1]
+        assert "- Business: none" in section
+
+    def test_clean_vault_reports_no_dangling_refs(
+        self, gardener, business_vault: Path, tmp_path: Path
+    ) -> None:
+        report = gardener.build_report(
+            vaults=[business_vault], run_state={"complete": True, "steps": {}}, json_out=tmp_path
+        )
+
+        assert "- Business: none" in report.split("## Dangling refs", 1)[1]
+
+    def test_malformed_topics_value_never_crashes_the_report(
+        self, gardener, business_vault: Path, tmp_path: Path
+    ) -> None:
+        _write(business_vault / "Bad.md", "---\ntype: note\ntopics: nope\n---\n\nbody\n")
+
+        report = gardener.build_report(
+            vaults=[business_vault], run_state={"complete": True, "steps": {}}, json_out=tmp_path
+        )
+
+        assert "## Dangling refs" in report

@@ -10,7 +10,15 @@ from pathlib import Path
 
 import pytest
 
-from scripts.classify.topics import Topic, load_topics, slugify, validate
+from scripts.classify.topics import (
+    QuarantinedTopic,
+    Topic,
+    load_rejected_slugs,
+    load_topic_report,
+    load_topics,
+    slugify,
+    validate,
+)
 
 
 FIXTURE_VAULT = (
@@ -58,11 +66,16 @@ class TestLoadTopics:
         ]
         assert julies.status == "active"
 
-    def test_slug_must_match_filename_stem(self, tmp_path: Path) -> None:
+    def test_slug_mismatch_is_quarantined_not_raised(self, tmp_path: Path) -> None:
         bad = _write_topic_stub(tmp_path, "julies-finances.md", slug="wrong-slug")
 
-        with pytest.raises(ValueError, match=rf"{bad.name}.*wrong-slug.*julies-finances"):
-            load_topics(tmp_path)
+        report = load_topic_report(tmp_path)
+
+        assert report.topics == []
+        assert [q.path for q in report.quarantined] == [bad]
+        assert "wrong-slug" in report.quarantined[0].reason
+        # load_topics never raises on a bad file — the safety net
+        assert load_topics(tmp_path) == []
 
     def test_paused_stubs_are_skipped(self, tmp_path: Path) -> None:
         _write_topic_stub(tmp_path, "active-topic.md", aliases="[Active alias]")
@@ -92,23 +105,25 @@ class TestLoadTopics:
             encoding="utf-8",
         )
 
-        with pytest.raises(ValueError) as excinfo:
-            load_topics(tmp_path)
+        report = load_topic_report(tmp_path)
 
-        message = str(excinfo.value)
-        assert bad.name in message
-        assert "YAML" in message or "yaml" in message
-        assert good.name not in message
+        assert [t.slug for t in report.topics] == ["good-topic"]
+        assert [q.path for q in report.quarantined] == [bad]
+        reason = report.quarantined[0].reason
+        assert "YAML" in reason or "yaml" in reason
 
-    def test_aliases_as_bare_string_is_an_error(self, tmp_path: Path) -> None:
+    def test_bare_string_aliases_is_quarantined_not_raised(self, tmp_path: Path) -> None:
         bad = _write_topic_stub(
             tmp_path,
             "string-alias.md",
             aliases="single bare alias",
         )
 
-        with pytest.raises(ValueError, match=rf"{bad.name}.*aliases.*list"):
-            load_topics(tmp_path)
+        report = load_topic_report(tmp_path)
+
+        assert report.topics == []
+        assert [q.path for q in report.quarantined] == [bad]
+        assert "aliases" in report.quarantined[0].reason
 
     def test_empty_alias_list_loads_without_crashing(self, tmp_path: Path) -> None:
         _write_topic_stub(tmp_path, "empty-aliases.md", aliases="[]")
@@ -154,15 +169,17 @@ class TestExcludeField:
         )
         assert load_topics(tmp_path)[0].exclude == []
 
-    def test_exclude_as_bare_string_is_an_error(self, tmp_path: Path) -> None:
+    def test_exclude_as_bare_string_is_quarantined_not_raised(self, tmp_path: Path) -> None:
         path = tmp_path / "wiki" / "topics" / "t.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             "---\ntype: topic\nslug: t\naliases: [a]\nexclude: nope\nstatus: active\n---\n",
             encoding="utf-8",
         )
-        with pytest.raises(ValueError, match=r"t\.md.*exclude.*list"):
-            load_topics(tmp_path)
+        report = load_topic_report(tmp_path)
+        assert report.topics == []
+        assert [q.path for q in report.quarantined] == [path]
+        assert "exclude" in report.quarantined[0].reason
 
 
 class TestSlugify:
@@ -211,3 +228,86 @@ class TestValidateTopics:
         with pytest.raises(ValueError, match="julies-finances"):
             validate([topic_a, topic_b])
 
+
+class TestFailSoftLoad:
+    """The safety net: one bad topic file must never brick the vault's chain."""
+
+    def test_alias_collision_quarantines_later_keeps_earlier(self, tmp_path: Path) -> None:
+        # sorted glob order: alpha.md before beta.md → alpha wins, beta quarantined.
+        _write_topic_stub(tmp_path, "alpha.md", aliases="[Shared alias]")
+        beta = _write_topic_stub(tmp_path, "beta.md", aliases="[shared alias]")
+
+        report = load_topic_report(tmp_path)
+
+        assert [t.slug for t in report.topics] == ["alpha"]
+        assert [q.path for q in report.quarantined] == [beta]
+        assert "alias" in report.quarantined[0].reason.lower()
+
+    def test_one_bad_file_never_blocks_the_rest(self, tmp_path: Path) -> None:
+        _write_topic_stub(tmp_path, "good-one.md", aliases="[Alpha]")
+        _write_topic_stub(tmp_path, "good-two.md", aliases="[Beta]")
+        _write_topic_stub(tmp_path, "bad.md", slug="mismatch", aliases="[Gamma]")
+
+        topics = load_topics(tmp_path)
+
+        assert sorted(t.slug for t in topics) == ["good-one", "good-two"]
+
+    def test_report_is_empty_for_a_clean_vault(self, tmp_path: Path) -> None:
+        _write_topic_stub(tmp_path, "clean.md", aliases="[Clean]")
+
+        report = load_topic_report(tmp_path)
+
+        assert [t.slug for t in report.topics] == ["clean"]
+        assert report.quarantined == []
+        assert isinstance(report.quarantined, list)
+
+    def test_quarantined_topic_record_shape(self, tmp_path: Path) -> None:
+        bad = _write_topic_stub(tmp_path, "x.md", slug="not-x")
+
+        record = load_topic_report(tmp_path).quarantined[0]
+
+        assert isinstance(record, QuarantinedTopic)
+        assert record.path == bad
+        assert isinstance(record.reason, str) and record.reason
+
+
+
+class TestRejectedTombstones:
+    """The reject ritual is a tombstone, never a raw delete: the file stays so
+    existing backlinks keep resolving, but the topic leaves the active set."""
+
+    def test_rejected_stubs_are_skipped_like_paused(self, tmp_path: Path) -> None:
+        _write_topic_stub(tmp_path, "keeper.md", aliases="[Keeper]")
+        _write_topic_stub(
+            tmp_path, "wrong-topic.md", aliases="[Wrong topic]", status="rejected"
+        )
+
+        topics = load_topics(tmp_path)
+
+        assert [topic.slug for topic in topics] == ["keeper"]
+
+    def test_rejected_stub_is_not_quarantined(self, tmp_path: Path) -> None:
+        _write_topic_stub(tmp_path, "wrong-topic.md", status="rejected")
+
+        assert load_topic_report(tmp_path).quarantined == []
+
+    def test_load_rejected_slugs_returns_only_tombstones(self, tmp_path: Path) -> None:
+        _write_topic_stub(tmp_path, "active-topic.md", aliases="[Active]")
+        _write_topic_stub(tmp_path, "paused-topic.md", aliases="[Paused]", status="paused")
+        _write_topic_stub(tmp_path, "rejected-topic.md", aliases="[Rejected]", status="rejected")
+
+        assert load_rejected_slugs(tmp_path) == {"rejected-topic"}
+
+    def test_load_rejected_slugs_on_a_vault_with_no_topics_dir(self, tmp_path: Path) -> None:
+        assert load_rejected_slugs(tmp_path) == set()
+
+    def test_rejected_alias_does_not_block_a_live_topic(self, tmp_path: Path) -> None:
+        """A tombstone must not keep hogging its aliases — the alias-collision
+        check only applies to the active set."""
+        _write_topic_stub(tmp_path, "alpha.md", aliases="[Shared alias]")
+        _write_topic_stub(tmp_path, "zeta.md", aliases="[Shared alias]", status="rejected")
+
+        report = load_topic_report(tmp_path)
+
+        assert [topic.slug for topic in report.topics] == ["alpha"]
+        assert report.quarantined == []

@@ -1,4 +1,14 @@
-"""Nightly/panel orchestrator for the vault synthesis chain."""
+"""Nightly/panel orchestrator for the vault synthesis chain.
+
+Step order is ``export → classify → collect → propose → synthesise → backlink
+→ gardener``. Propose sits *before* synthesise/backlink deliberately: a topic
+stub it creates is exercised by the same run that wrote it, so a bad stub fails
+tonight next to its cause instead of surfacing as a mystery failure tomorrow.
+
+Panel (on-demand) runs preview propose only — no writes, no LM inference — per
+the daily-cap policy in ``plans/decisions.md`` (2026-07-10). Pass ``--backlog``
+to lift the proposer's recency window and sweep the whole vault once.
+"""
 
 from __future__ import annotations
 
@@ -26,6 +36,8 @@ from scripts.classify.gardener import build_report, write_report
 from scripts.classify.home_dashboard import build_home_section, write_home
 from scripts.classify.synthesize_topic import SynthesisResult, synthesize_topic
 from scripts.classify.topic_backlinks import BacklinkSummary, reconcile_backlinks
+from scripts.classify.topic_preflight import sweep_topic_conflicts
+from scripts.classify.topic_proposer import propose_topics
 from scripts.classify.topics import Topic, load_topics
 from scripts.classify.wiki_io import append_log
 
@@ -36,7 +48,7 @@ _DEFAULT_STATE_DIR = _REPO_ROOT / "scripts" / "classify" / ".chain_state"
 _DEFAULT_JSON_OUT = _REPO_ROOT / "scripts" / "classify" / ".topic_cache"
 _LOCK_NAME = "nightly_chain.lock"
 _EXPORT_TIMEOUT_SECONDS = 900
-_PANEL_STEPS = ("classify", "collect", "synthesize", "backlink")
+_PANEL_STEPS = ("classify", "collect", "propose", "synthesize", "backlink")
 _TRANSIENT_NEEDLES = ("connection", "timeout", "timed out", "unreachable", "refused")
 _LM_CHECK_TIMEOUT_SECONDS = 3.0
 
@@ -87,6 +99,8 @@ class RunContext:
     state_dir: Path
     json_out: Path
     dry_run: bool
+    lm_available: bool = False
+    full: bool = False
     current_step: str = ""
 
 
@@ -170,7 +184,21 @@ def _step_backlink(context: RunContext) -> StepResult:
 
 
 def _step_propose(context: RunContext) -> StepResult:
-    return StepResult("stub", "U6 pending")
+    # Panel is a preview: no stubs written, no gemma inference (which would
+    # contend with interactive work), per the daily-cap decision.
+    preview = context.mode == "panel"
+    parts: list[str] = []
+    for vault in context.vaults:
+        summary = propose_topics(
+            vault=vault,
+            json_out=context.json_out,
+            state_dir=context.state_dir,
+            lm_available=context.lm_available and not preview,
+            dry_run=context.dry_run or preview,
+            full=context.full,
+        )
+        parts.append(f"{vault.name}: {summary.detail()}")
+    return StepResult("ok", "; ".join(parts))
 
 
 def _step_gardener(context: RunContext) -> StepResult:
@@ -204,9 +232,9 @@ STEP_SPECS: tuple[StepSpec, ...] = (
     StepSpec("export", _step_export),
     StepSpec("classify", _step_classify),
     StepSpec("collect", _step_collect),
+    StepSpec("propose", _step_propose),
     StepSpec("synthesize", _step_synthesize),
     StepSpec("backlink", _step_backlink),
-    StepSpec("propose", _step_propose),
     StepSpec("gardener", _step_gardener),
 )
 
@@ -217,6 +245,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--steps", help="Comma-separated step names for surgical reruns.")
     parser.add_argument("--vaults", choices=("both", "personal", "business"), default="both")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--backlog",
+        action="store_true",
+        help="Lift the proposer's recency window and sweep the whole vault once.",
+    )
     parser.add_argument("--personal-vault", type=Path, default=_vault_from_env("PERSONAL"))
     parser.add_argument("--business-vault", type=Path, default=_vault_from_env("BUSINESS"))
     parser.add_argument("--state-dir", type=Path, default=_DEFAULT_STATE_DIR)
@@ -235,6 +268,7 @@ def main(argv: list[str] | None = None) -> int:
         state_dir=args.state_dir,
         json_out=args.json_out,
         dry_run=args.dry_run,
+        full=args.backlog,
     )
     return run_chain(context=context, step_names=_parse_steps(args.steps))
 
@@ -249,11 +283,16 @@ def run_chain(*, context: RunContext, step_names: list[str] | None = None) -> in
         return 0
 
     lm_status = check_lm_studio()
+    context = replace(context, lm_available=bool(lm_status.get("available")))
+    # Pre-flight before any step reads wiki/topics/: iCloud conflict copies and
+    # dataless placeholders are moved aside so the reader never sees them.
+    swept = _sweep_topic_conflicts(context)
     run_state = {
         "started_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "mode": context.mode,
         "complete": False,
         "lm_studio": lm_status,
+        "topic_conflicts_swept": swept,
         "steps": {},
     }
     _write_run_state(context.state_dir, run_state)
@@ -273,6 +312,19 @@ def run_chain(*, context: RunContext, step_names: list[str] | None = None) -> in
         return 0
     finally:
         _release_lock(lock)
+
+
+def _sweep_topic_conflicts(context: RunContext) -> list[str]:
+    """Never raises: a sweep failure must not take the whole chain down."""
+    if context.dry_run:
+        return []
+    swept: list[str] = []
+    for vault in context.vaults:
+        try:
+            swept.extend(str(path) for path in sweep_topic_conflicts(vault))
+        except OSError as exc:
+            print(f"⚠ topic pre-flight sweep failed for {vault.name}: {exc}")
+    return swept
 
 
 def _run_step(*, context: RunContext, spec: StepSpec, run_state: dict[str, Any]) -> None:

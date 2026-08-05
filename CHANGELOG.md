@@ -13,6 +13,26 @@ Each entry is split into:
 
 ---
 
+## [0.16.0] — 2026-08-05
+
+### What's new
+- **The vault now tells you what it's about, without being asked.** The nightly chain spots recurring themes that have no topic stub yet — a cluster of notes about the same person, tag, or org — and surfaces them as proposals in the morning gardener report, with a suggested name, aliases, and the notes behind them. Say yes by creating the stub; say no by tombstoning it, and it never comes back.
+- **Auto-create ships switched off.** The proposer can create topic stubs on its own, but the confidence bar is deliberately set out of reach until real accept/reject labels show the threshold is precise enough. Until then everything routes to the report for a human decision.
+- **Weak signals accumulate instead of vanishing.** A theme too thin to propose this week is remembered in a ledger, gains evidence each time it recurs, decays if it doesn't, and gets promoted to a proposal once it earns it.
+- **Rejecting a topic is now safe.** Tombstone it (`status: rejected`) rather than deleting the file: existing backlinks keep resolving, synthesis skips it, and the proposer never re-suggests it. If something does get raw-deleted, the report flags the dangling references — it never edits your notes to "fix" them.
+- **One bad topic file can no longer stop the night.** A malformed or conflicted stub is quarantined and reported; the rest of the chain runs. iCloud conflict copies and dataless placeholders are swept aside before anything reads them.
+- **`--backlog`** runs the proposer over the whole vault once instead of the recent window.
+
+### Under the hood
+- `scripts/classify/topic_proposer.py` (new, Units 1–8): anchor-gated clustering (a specific person/tag/org is the only thing that forms an edge; tokens never do) with IDF-weighted Jaccard cohesion and a complete-linkage density peel to kill chaining; confidence as a weighted **geometric** mean of anchor breadth, cohesion, and saturating size, so one weak dimension vetoes rather than being averaged away; routing to auto-create / propose / ledger; LLM naming with deterministic fallback; `cluster_signature` → slug idempotence.
+- Write safety in depth: union-validate `{existing ∪ all new}` before writing, path-allowlisted slug-sanitised atomic writes, then a post-write `load_topic_report` self-check that rolls the whole batch back if any stub fails to load.
+- `scripts/classify/topics.py`: `load_topics` is now **fail-soft** — `load_topic_report` returns `(topics, quarantined)` instead of raising, so one bad file degrades to a report line; `validate` remains the strict primitive. `status: rejected` joins `paused` as inactive; `load_rejected_slugs` exposes tombstones.
+- `scripts/classify/topic_preflight.py` (new): sweeps iCloud conflict copies / `.icloud` placeholders into `wiki/topics/_quarantine/` before any read.
+- `scripts/classify/nightly_chain.py`: step order is now export → classify → collect → **propose** → synthesize → backlink → gardener, so a stub is exercised by the run that created it (failure locality); `RunContext` carries `lm_available`/`full`; panel mode previews propose with no writes and no inference (daily-cap decision, 2026-07-10).
+- `scripts/classify/gardener.py`: Auto-created / Proposals / Ledger / Quarantine / Dangling refs sections replace the "pending U6" stub; orphan `up:` and dangling `topics:` share one frontmatter pass.
+- Ledger and proposer artifacts are derived JSON in the gitignored machine cache (`.chain_state`/`.topic_cache`), off the iCloud tree, schema-versioned, lockfile-guarded, corrupt-tolerant.
+- 774 tests passing (91 new on this branch), every unit red-first.
+
 ## [0.15.0] — 2026-07-27
 
 ### What's new

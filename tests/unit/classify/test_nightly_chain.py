@@ -64,9 +64,9 @@ def test_nightly_mode_runs_steps_zero_to_six_in_order(
                 "export",
                 "classify",
                 "collect",
+                "propose",
                 "synthesize",
                 "backlink",
-                "propose",
                 "gardener",
             ]
         ),
@@ -78,9 +78,9 @@ def test_nightly_mode_runs_steps_zero_to_six_in_order(
         "export",
         "classify",
         "collect",
+        "propose",
         "synthesize",
         "backlink",
-        "propose",
         "gardener",
     ]
     run_state = _state(tmp_path / "state")
@@ -88,7 +88,7 @@ def test_nightly_mode_runs_steps_zero_to_six_in_order(
     assert list(run_state["steps"]) == calls
 
 
-def test_panel_mode_runs_classify_collect_synthesize_backlink_only(
+def test_panel_mode_runs_classify_collect_propose_synthesize_backlink_only(
     nightly_chain, tmp_path: Path, vaults: tuple[Path, Path], monkeypatch
 ) -> None:
     calls: list[str] = []
@@ -106,9 +106,9 @@ def test_panel_mode_runs_classify_collect_synthesize_backlink_only(
                 "export",
                 "classify",
                 "collect",
+                "propose",
                 "synthesize",
                 "backlink",
-                "propose",
                 "gardener",
             ]
         ),
@@ -116,7 +116,7 @@ def test_panel_mode_runs_classify_collect_synthesize_backlink_only(
 
     assert _run_cli(nightly_chain, tmp_path, vaults, "--mode", "panel") == 0
 
-    assert calls == ["classify", "collect", "synthesize", "backlink"]
+    assert calls == ["classify", "collect", "propose", "synthesize", "backlink"]
     assert list(_state(tmp_path / "state")["steps"]) == calls
 
 
@@ -492,3 +492,260 @@ class TestLMStudioPreflight:
         state = _state(tmp_path / "state")
         assert state["lm_studio"]["available"] is True
         assert "LM Studio not reachable" not in capsys.readouterr().out
+
+
+class TestProposeStep:
+    """U6 Unit 7: propose runs inside the chain, before synthesise/backlink so a
+    bad stub fails in the same run that created it (failure locality)."""
+
+    def _summary(self, **kwargs):
+        from scripts.classify.topic_proposer import ProposeSummary
+
+        defaults = dict(
+            auto_created=("auto-a",),
+            proposed=("prop-b", "prop-c"),
+            ledgered=4,
+            promoted=(),
+            rolled_back=(),
+        )
+        defaults.update(kwargs)
+        return ProposeSummary(**defaults)
+
+    def _context(self, nightly_chain, tmp_path: Path, vaults, **overrides):
+        personal, business = vaults
+        base = dict(
+            mode="nightly",
+            vaults=[personal, business],
+            personal_vault=personal,
+            business_vault=business,
+            state_dir=tmp_path / "state",
+            json_out=tmp_path / "cache",
+            dry_run=False,
+        )
+        base.update(overrides)
+        return nightly_chain.RunContext(**base)
+
+    def test_step_specs_place_propose_between_collect_and_synthesize(
+        self, nightly_chain
+    ) -> None:
+        assert [spec.name for spec in nightly_chain.STEP_SPECS] == [
+            "export",
+            "classify",
+            "collect",
+            "propose",
+            "synthesize",
+            "backlink",
+            "gardener",
+        ]
+
+    def test_propose_step_runs_every_vault_and_reports_counts(
+        self, nightly_chain, tmp_path: Path, vaults, monkeypatch
+    ) -> None:
+        seen: list[tuple] = []
+
+        def fake(*, vault, json_out, state_dir, lm_available, dry_run, full):
+            seen.append((vault.name, lm_available, dry_run, full))
+            return self._summary()
+
+        monkeypatch.setattr(nightly_chain, "propose_topics", fake)
+
+        result = nightly_chain._step_propose(
+            self._context(nightly_chain, tmp_path, vaults, lm_available=True)
+        )
+
+        assert result.status == "ok"
+        assert "Personal: 1 auto-created, 2 proposed, 4 ledgered" in result.detail
+        assert "Business: 1 auto-created, 2 proposed, 4 ledgered" in result.detail
+        assert seen == [("Personal", True, False, False), ("Business", True, False, False)]
+
+    def test_panel_mode_propose_is_a_no_write_no_inference_preview(
+        self, nightly_chain, tmp_path: Path, vaults, monkeypatch
+    ) -> None:
+        """decisions.md 2026-07-10 caps proposals at daily: a midday panel run
+        previews without writing stubs or contending for gemma."""
+        seen: list[tuple] = []
+
+        def fake(*, vault, json_out, state_dir, lm_available, dry_run, full):
+            seen.append((lm_available, dry_run))
+            return self._summary()
+
+        monkeypatch.setattr(nightly_chain, "propose_topics", fake)
+
+        nightly_chain._step_propose(
+            self._context(
+                nightly_chain, tmp_path, vaults, mode="panel", lm_available=True
+            )
+        )
+
+        assert seen == [(False, True), (False, True)]
+
+    def test_skipped_lock_is_reported_not_silently_ok(
+        self, nightly_chain, tmp_path: Path, vaults, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(
+            nightly_chain,
+            "propose_topics",
+            lambda **kwargs: self._summary(skipped_lock=True),
+        )
+
+        result = nightly_chain._step_propose(
+            self._context(nightly_chain, tmp_path, vaults)
+        )
+
+        assert "skipped (locked)" in result.detail
+
+    def test_lm_availability_reaches_the_step_context(
+        self, nightly_chain, tmp_path: Path, vaults, monkeypatch
+    ) -> None:
+        observed: list[bool] = []
+
+        def observe(context):
+            observed.append(context.lm_available)
+            return nightly_chain.StepResult("ok", "")
+
+        monkeypatch.setattr(
+            nightly_chain,
+            "check_lm_studio",
+            lambda: {"available": True, "base_url": "x", "reason": None, "models": []},
+        )
+        monkeypatch.setattr(
+            nightly_chain, "STEP_SPECS", (nightly_chain.StepSpec("propose", observe),)
+        )
+
+        assert _run_cli(nightly_chain, tmp_path, vaults, "--mode", "nightly") == 0
+
+        assert observed == [True]
+
+    def test_backlog_flag_lifts_the_recency_window(
+        self, nightly_chain, tmp_path: Path, vaults, monkeypatch
+    ) -> None:
+        observed: list[bool] = []
+
+        def observe(context):
+            observed.append(context.full)
+            return nightly_chain.StepResult("ok", "")
+
+        monkeypatch.setattr(
+            nightly_chain,
+            "check_lm_studio",
+            lambda: {"available": False, "base_url": "x", "reason": "off", "models": []},
+        )
+        monkeypatch.setattr(
+            nightly_chain, "STEP_SPECS", (nightly_chain.StepSpec("propose", observe),)
+        )
+
+        assert _run_cli(nightly_chain, tmp_path, vaults, "--mode", "nightly") == 0
+        assert _run_cli(
+            nightly_chain, tmp_path, vaults, "--mode", "nightly", "--backlog"
+        ) == 0
+
+        assert observed == [False, True]
+
+    def test_preflight_sweeps_conflict_copies_before_any_step_reads_topics(
+        self, nightly_chain, tmp_path: Path, vaults, monkeypatch
+    ) -> None:
+        personal, _ = vaults
+        topics = personal / "wiki" / "topics"
+        topics.mkdir(parents=True)
+        conflict = topics / "julie-finances 2.md"
+        conflict.write_text("---\ntype: topic\n---\n", encoding="utf-8")
+
+        observed: list[bool] = []
+
+        def observe(context):
+            observed.append(conflict.exists())
+            return nightly_chain.StepResult("ok", "")
+
+        monkeypatch.setattr(
+            nightly_chain,
+            "check_lm_studio",
+            lambda: {"available": False, "base_url": "x", "reason": "off", "models": []},
+        )
+        monkeypatch.setattr(
+            nightly_chain, "STEP_SPECS", (nightly_chain.StepSpec("collect", observe),)
+        )
+
+        assert _run_cli(nightly_chain, tmp_path, vaults, "--mode", "nightly") == 0
+
+        assert observed == [False]
+        assert (topics / "_quarantine" / "julie-finances 2.md").exists()
+        swept = _state(tmp_path / "state")["topic_conflicts_swept"]
+        assert any("julie-finances 2.md" in entry for entry in swept)
+
+    def test_propose_failure_does_not_block_the_gardener_report(
+        self, nightly_chain, tmp_path: Path, vaults, monkeypatch
+    ) -> None:
+        def boom(**kwargs):
+            raise ValueError("clustering exploded")
+
+        monkeypatch.setattr(nightly_chain, "propose_topics", boom)
+        monkeypatch.setattr(
+            nightly_chain,
+            "check_lm_studio",
+            lambda: {"available": False, "base_url": "x", "reason": "off", "models": []},
+        )
+        personal, _ = vaults
+        (personal / "wiki" / "topics").mkdir(parents=True)
+        (personal / "wiki" / "index.md").write_text("# Wiki\n", encoding="utf-8")
+
+        assert (
+            _run_cli(
+                nightly_chain,
+                tmp_path,
+                vaults,
+                "--mode",
+                "nightly",
+                "--vaults",
+                "personal",
+                "--steps",
+                "propose,gardener",
+            )
+            == 0
+        )
+
+        steps = _state(tmp_path / "state")["steps"]
+        assert steps["propose"]["status"] == "failed"
+        assert steps["gardener"]["status"] == "ok"
+
+    def test_undeclared_cluster_reaches_the_gardener_report_in_one_run(
+        self, nightly_chain, tmp_path: Path, vaults, monkeypatch
+    ) -> None:
+        """THE ACCEPTANCE CRITERION: a theme with no topic stub is surfaced as a
+        proposal in wiki/gardener.md within a single nightly cycle."""
+        personal, _ = vaults
+        (personal / "wiki" / "topics").mkdir(parents=True)
+        (personal / "wiki" / "index.md").write_text("# Wiki\n", encoding="utf-8")
+        for i in range(4):
+            (personal / f"connor-note-{i}.md").write_text(
+                "---\ntype: note\npeople: [Connor]\n---\n\n"
+                f"homework lying school incident day{i}\n",
+                encoding="utf-8",
+            )
+
+        monkeypatch.setattr(
+            nightly_chain,
+            "check_lm_studio",
+            lambda: {"available": False, "base_url": "x", "reason": "off", "models": []},
+        )
+
+        assert (
+            _run_cli(
+                nightly_chain,
+                tmp_path,
+                vaults,
+                "--mode",
+                "nightly",
+                "--vaults",
+                "personal",
+                "--backlog",
+                "--steps",
+                "propose,gardener",
+            )
+            == 0
+        )
+
+        report = (personal / "wiki" / "gardener.md").read_text(encoding="utf-8")
+        assert "## Proposals" in report
+        assert "Topic proposer is pending U6." not in report
+        assert "connor" in report.lower()
+        assert _state(tmp_path / "state")["steps"]["propose"]["status"] == "ok"
