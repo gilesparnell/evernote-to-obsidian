@@ -25,6 +25,22 @@ import yaml
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 _REQUIRED_FIELDS = ("type", "org", "context", "up")
 
+# Provenance sentinels for the `classified_by` field.
+#
+# granolaSync's export_granola.py stamps every note it writes with hardcoded
+# placeholders (always type=meeting, always context=work). Those four required
+# fields being present used to make is_classified() return True, so the LM
+# classifier never revisited them — permanently freezing notes like "Bed Linen
+# for the Family" as work meetings. Marking them PROVISIONAL keeps them in the
+# queue until the classifier has had a look.
+#
+# Anything else — including the field being absent, which is the case for every
+# note written before this existed — counts as settled. That default is
+# load-bearing: treating absence as unclassified would re-queue the whole
+# corpus.
+PROVISIONAL_PROVENANCE = "export"
+CLASSIFIER_PROVENANCE = "classifier"
+
 
 def _split(text: str) -> tuple[dict[str, Any], str]:
     """Return (frontmatter dict, body). Empty dict if no frontmatter block."""
@@ -57,7 +73,11 @@ def write_frontmatter(path: Path, new_fields: dict[str, Any]) -> None:
     yaml_block = yaml.safe_dump(
         fm,
         sort_keys=False,
-        default_flow_style=None,
+        # Block style ALWAYS. `None` here lets PyYAML collapse a mapping with
+        # no nested collections onto a single `{k: v, ...}` line — which is
+        # exactly the shape of a Granola export's frontmatter. Still valid
+        # YAML, but unreadable in the editor and useless in a diff.
+        default_flow_style=False,
         allow_unicode=True,
     )
     if not body.startswith("\n"):
@@ -70,4 +90,6 @@ def write_frontmatter(path: Path, new_fields: dict[str, Any]) -> None:
 
 def is_classified(path: Path) -> bool:
     fm = read_frontmatter(path)
-    return all(fm.get(field) for field in _REQUIRED_FIELDS)
+    if not all(fm.get(field) for field in _REQUIRED_FIELDS):
+        return False
+    return fm.get("classified_by") != PROVISIONAL_PROVENANCE

@@ -251,3 +251,110 @@ class TestIsClassified:
             encoding="utf-8",
         )
         assert is_classified(note) is False
+
+
+class TestProvisionalProvenance:
+    """`classified_by` marks WHO wrote the metadata, so a provisional stamp
+    from an external exporter can be upgraded by the LM classifier later.
+
+    Background: granolaSync's export_granola.py hardcodes `context: work` and
+    `type: meeting` on every note it writes. Those four required fields being
+    present made is_classified() return True, so the LM never revisited them —
+    permanently freezing "Bed Linen for the Family" as a work meeting.
+    """
+
+    def _fm(self, extra: str = "") -> str:
+        return (
+            "---\n"
+            "type: meeting\n"
+            "org: Personal\n"
+            "context: work\n"
+            'up: "[[Meetings]]"\n'
+            f"{extra}"
+            "---\n\nbody.\n"
+        )
+
+    def test_export_stamped_note_is_not_classified(self, tmp_path: Path) -> None:
+        """The whole point: provisional metadata must not block the LM."""
+        note = tmp_path / "n.md"
+        note.write_text(self._fm("classified_by: export\n"), encoding="utf-8")
+        assert is_classified(note) is False
+
+    def test_classifier_stamped_note_is_classified(self, tmp_path: Path) -> None:
+        """Once the pipeline has decided, it must not re-process forever."""
+        note = tmp_path / "n.md"
+        note.write_text(self._fm("classified_by: classifier\n"), encoding="utf-8")
+        assert is_classified(note) is True
+
+    def test_legacy_note_without_provenance_stays_classified(
+        self, tmp_path: Path
+    ) -> None:
+        """Backwards compatibility, and it is load-bearing: ~1,483 notes carry
+        no provenance. Treating absence as unclassified would queue the entire
+        corpus for re-classification — 25+ hours at current LM throughput.
+        """
+        note = tmp_path / "n.md"
+        note.write_text(self._fm(), encoding="utf-8")
+        assert is_classified(note) is True
+
+    def test_export_stamp_with_missing_required_field_still_unclassified(
+        self, tmp_path: Path
+    ) -> None:
+        note = tmp_path / "n.md"
+        note.write_text(
+            '---\ntype: meeting\nclassified_by: export\n---\n\nbody.\n',
+            encoding="utf-8",
+        )
+        assert is_classified(note) is False
+
+    def test_unknown_provenance_value_is_treated_as_classified(
+        self, tmp_path: Path
+    ) -> None:
+        """Only the explicit `export` sentinel reopens a note. An unrecognised
+        value must not silently queue notes for re-processing.
+        """
+        note = tmp_path / "n.md"
+        note.write_text(self._fm("classified_by: something-else\n"), encoding="utf-8")
+        assert is_classified(note) is True
+
+
+class TestBlockStyleAlways:
+    """Frontmatter must always be block style, never YAML flow style.
+
+    PyYAML's `default_flow_style=None` collapses a mapping with no nested
+    collections onto one line: `{date: ..., type: meeting, org: Personal}`.
+    Notes carrying `people:`/`tags:` lists escaped this, which is why it went
+    unnoticed — but a flat note (every Granola export) got mangled. It stays
+    valid YAML and Obsidian still parses it, so nothing breaks loudly; the
+    frontmatter just becomes unreadable and un-diffable.
+    """
+
+    def test_flat_mapping_is_written_block_style(self, tmp_path: Path) -> None:
+        note = tmp_path / "n.md"
+        note.write_text("body\n", encoding="utf-8")
+        write_frontmatter(
+            note,
+            {"type": "meeting", "org": "Personal", "context": "work"},
+        )
+        text = note.read_text(encoding="utf-8")
+        assert "{" not in text, f"flow style leaked into frontmatter:\n{text}"
+        assert "type: meeting\n" in text
+        assert "org: Personal\n" in text
+
+    def test_mapping_with_lists_stays_block_style(self, tmp_path: Path) -> None:
+        note = tmp_path / "n.md"
+        note.write_text("body\n", encoding="utf-8")
+        write_frontmatter(
+            note,
+            {"type": "meeting", "people": ["Ada L"], "tags": ["x"]},
+        )
+        text = note.read_text(encoding="utf-8")
+        assert "type: meeting\n" in text
+        assert "{" not in text.split("---")[1]
+
+    def test_round_trip_preserves_values(self, tmp_path: Path) -> None:
+        note = tmp_path / "n.md"
+        note.write_text("body\n", encoding="utf-8")
+        fields = {"type": "meeting", "org": "Personal", "classified_by": "export"}
+        write_frontmatter(note, fields)
+        assert read_frontmatter(note) == fields
