@@ -48,6 +48,14 @@ _DEFAULT_STATE_DIR = _REPO_ROOT / "scripts" / "classify" / ".chain_state"
 _DEFAULT_JSON_OUT = _REPO_ROOT / "scripts" / "classify" / ".topic_cache"
 _LOCK_NAME = "nightly_chain.lock"
 _EXPORT_TIMEOUT_SECONDS = 900
+
+# Ceiling on how many notes one nightly run will classify. Uncapped, a bulk
+# import — or a batch of notes re-opened by the `classified_by: export`
+# provenance rule — becomes a single multi-hour run holding the LM resident.
+# A larger local model can push this past a minute per note, which makes 70
+# notes an hour-plus job. A backlog drains
+# over successive nights instead; `--backlog` lifts the cap deliberately.
+NIGHTLY_CLASSIFY_LIMIT = 50
 _PANEL_STEPS = ("classify", "collect", "propose", "synthesize", "backlink")
 _TRANSIENT_NEEDLES = ("connection", "timeout", "timed out", "unreachable", "refused")
 _LM_CHECK_TIMEOUT_SECONDS = 3.0
@@ -125,7 +133,10 @@ def _step_classify(context: RunContext) -> StepResult:
     parts: list[str] = []
     for vault in context.vaults:
         summary = classify_vault(
-            vault=vault, dry_run=context.dry_run, purge_enabled=False
+            vault=vault,
+            dry_run=context.dry_run,
+            purge_enabled=False,
+            limit=None if context.full else NIGHTLY_CLASSIFY_LIMIT,
         )
         parts.append(
             f"{vault.name}: {summary.get('auto_classified', 0)} new / "

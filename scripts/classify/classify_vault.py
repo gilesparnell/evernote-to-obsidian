@@ -527,6 +527,9 @@ def classify_vault(  # noqa: PLR0913 (caller-driven flag surface)
                 "tags": chosen["tags"],
                 "up": up_for_type(chosen["type"]),
                 "classify_confidence": round(chosen["confidence"], 2),
+                # Claim the note, so a provisional `export` stamp from
+                # granolaSync is not re-processed on every subsequent run.
+                "classified_by": _fm.CLASSIFIER_PROVENANCE,
             }
             if not dry_run:
                 _fm.write_frontmatter(md_path, new_fields)

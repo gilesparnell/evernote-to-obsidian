@@ -13,6 +13,24 @@ Each entry is split into:
 
 ---
 
+## [0.17.0] — 2026-09-02
+
+### What's new
+- **Granola meeting notes now get properly categorised.** The exporter stamps every note it writes with `type: meeting` and `context: work` — hardcoded guesses that are right for a calendar meeting and wrong for the solo recordings that make up most of the corpus. Because those looked like a finished classification, the LM never revisited them, so "Bed Linen for the Family" was filed as a work meeting for good. Exported notes are now marked provisional and get corrected on the next nightly run.
+- **A nightly ceiling on classification.** One run now classifies at most 50 notes, so a bulk import — or a batch of notes re-opened by the change above — drains over successive nights instead of becoming a single multi-hour run holding the model resident. `--backlog` lifts the cap deliberately.
+- **Frontmatter stays readable.** Notes with no list fields were being rewritten with their whole frontmatter collapsed onto one line in braces. Still valid YAML, still parsed by Obsidian, but unreadable in the editor and useless in a diff.
+- **`mark_granola_provisional`** re-opens Granola notes already on disk, which carry no provenance and would otherwise never be revisited.
+
+### Under the hood
+- `scripts/classify/frontmatter.py`: new `classified_by` provenance field with `PROVISIONAL_PROVENANCE = "export"` / `CLASSIFIER_PROVENANCE = "classifier"`. `is_classified()` now returns False for `export`-stamped notes. Absence of the field still counts as classified — deliberately, and load-bearing: treating absence as unclassified would re-queue ~1,483 notes, roughly 25 hours at current LM throughput. `write_frontmatter` switches `default_flow_style` from `None` to `False`; `None` collapses any mapping with no nested collections to flow style, which spared notes carrying `people:`/`tags:` lists and mangled every flat one.
+- `scripts/classify/classify_vault.py`: stamps `classified_by: classifier` on auto-classified notes so an upgrade converges in exactly one pass rather than burning an LM call nightly. Notes routed to review keep their `export` stamp and are retried.
+- `scripts/classify/nightly_chain.py`: `NIGHTLY_CLASSIFY_LIMIT = 50`, passed as `limit` from `_step_classify`; `--backlog` passes `None`.
+- `scripts/classify/mark_granola_provisional.py` (new): stamps `classified_by: export` on notes carrying a `granola_id` and no provenance. Skips `wiki/`, leaves classifier-claimed notes alone, idempotent, `--dry-run`, and throttled at 50 ms between writes for iCloud.
+- Paired with `granolaSync` emitting `classified_by: export` from `build_frontmatter`.
+- 800 tests passing (26 new), every unit red-first.
+
+---
+
 ## [0.16.0] — 2026-08-05
 
 ### What's new

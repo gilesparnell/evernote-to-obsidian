@@ -715,3 +715,103 @@ class TestLogNotes:
         classify_vault(vault=tmp_path)
         out = capsys.readouterr().out
         assert "auto\t" not in out
+
+
+class TestExportProvenanceUpgrade:
+    """End-to-end: a note stamped `classified_by: export` by granolaSync is
+    re-opened by the classifier, and the pipeline claims it on the way out so
+    it is not re-processed on every subsequent run.
+    """
+
+    _EXPORT_FM = (
+        "date: 2026-09-01\n"
+        "granola_id: 3e489f58-dc03-4ad9-a806-d377f86c0a8e\n"
+        'up: "[[Meetings]]"\n'
+        "type: meeting\n"
+        'org: "Personal"\n'
+        "context: work\n"
+        "classified_by: export"
+    )
+
+    def test_export_stamped_note_is_reclassified(self, tmp_path: Path) -> None:
+        note = tmp_path / "Bed Linen for the Family.md"
+        _write_note(
+            note,
+            frontmatter=self._EXPORT_FM,
+            body=(
+                "Need to order new bed linen for the kids' rooms. Compare "
+                "prices for the queen sets and check the delivery window "
+                "before the weekend."
+            ),
+        )
+        with patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("personal", "Personal", context="personal"),
+        ):
+            result = classify_vault(vault=tmp_path)
+
+        assert result["skipped_already_classified"] == 0
+        assert result["auto_classified"] == 1
+
+        from scripts.classify.frontmatter import read_frontmatter
+        fm = read_frontmatter(note)
+        assert fm["context"] == "personal", "the hardcoded work stamp must be corrected"
+        assert fm["type"] == "personal"
+
+    def test_reclassified_note_is_claimed_by_the_pipeline(
+        self, tmp_path: Path
+    ) -> None:
+        """Without this the note stays `export` forever and burns an LM call
+        every single night.
+        """
+        note = tmp_path / "Bed Linen for the Family.md"
+        _write_note(note, frontmatter=self._EXPORT_FM, body="Order new bed linen " * 10)
+        with patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("personal", "Personal", context="personal"),
+        ):
+            classify_vault(vault=tmp_path)
+
+        from scripts.classify.frontmatter import is_classified, read_frontmatter
+        assert read_frontmatter(note)["classified_by"] == "classifier"
+        assert is_classified(note) is True
+
+    def test_second_run_skips_the_upgraded_note(self, tmp_path: Path) -> None:
+        """Idempotency: the upgrade must converge after exactly one pass."""
+        note = tmp_path / "Bed Linen for the Family.md"
+        _write_note(note, frontmatter=self._EXPORT_FM, body="Order new bed linen " * 10)
+        with patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("personal", "Personal", context="personal"),
+        ):
+            classify_vault(vault=tmp_path)
+            second = classify_vault(vault=tmp_path)
+
+        assert second["auto_classified"] == 0
+        assert second["skipped_already_classified"] == 1
+
+    def test_low_confidence_export_note_is_not_falsely_claimed(
+        self, tmp_path: Path
+    ) -> None:
+        """A note that lands in the review queue must keep its `export` stamp,
+        so it is retried rather than silently frozen with the bad metadata.
+        """
+        note = tmp_path / "Ambiguous thing.md"
+        _write_note(
+            note,
+            frontmatter=self._EXPORT_FM,
+            body=(
+                "Just some random thoughts here about an event that happened "
+                "yesterday and a few notes I wanted to capture quickly before "
+                "I forget the details about what was discussed."
+            ),
+        )
+        with patch(
+            "scripts.classify.classify_vault.lm_classifier.classify",
+            return_value=_lm_result("note", "Personal", confidence=0.3),
+        ):
+            result = classify_vault(vault=tmp_path)
+
+        assert result["needs_review"] == 1
+        from scripts.classify.frontmatter import read_frontmatter
+        assert read_frontmatter(note)["classified_by"] == "export"

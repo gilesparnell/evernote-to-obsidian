@@ -2,13 +2,51 @@
 
 from __future__ import annotations
 
+import errno
+import time
 from pathlib import Path
 
+
+# Both vaults live on iCloud Drive, where macOS FileProvider intermittently
+# fails an ordinary read with EDEADLK ("Resource deadlock avoided") while it
+# materialises a file. It is transient — the same read succeeds moments later.
+#
+# This mattered more than it looks: append_log runs at the END of the nightly
+# chain, so a single stall threw away the whole run's summary and crashed the
+# process after every step had already done its work. wiki/gardener.md sat
+# frozen from 10 Aug 2026 as a result, which is precisely the report that would
+# have told the operator something was wrong.
+#
+# Only genuinely transient codes are retried. A missing file or a permissions
+# problem is real and must surface on the first attempt.
+_TRANSIENT_READ_ERRNOS = frozenset({errno.EDEADLK, errno.EAGAIN, errno.EBUSY})
+READ_ATTEMPTS = 5
+READ_BACKOFF_SECONDS = 0.2
 
 GENERATED_START = "<!-- @generated:start -->"
 GENERATED_END = "<!-- @generated:end -->"
 USER_START = "<!-- @user:start -->"
 USER_END = "<!-- @user:end -->"
+
+
+def _read_once(path: Path) -> str:
+    """The raw read. Separate so the retry wrapper has a seam to test against."""
+    return path.read_text(encoding="utf-8")
+
+
+def _read_text(path: Path) -> str:
+    """Read a vault file, retrying transient iCloud stalls with backoff."""
+    last: OSError | None = None
+    for attempt in range(READ_ATTEMPTS):
+        try:
+            return _read_once(path)
+        except OSError as exc:
+            if exc.errno not in _TRANSIENT_READ_ERRNOS:
+                raise
+            last = exc
+            time.sleep(READ_BACKOFF_SECONDS * (2**attempt))
+    assert last is not None
+    raise last
 
 
 def replace_generated_region(text: str, new_body: str) -> str:
@@ -48,7 +86,7 @@ def replace_generated_region(text: str, new_body: str) -> str:
 
 def append_log(vault: Path, entry: str) -> None:
     path = vault / "wiki" / "log.md"
-    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    existing = _read_text(path) if path.exists() else ""
     line = entry if entry.endswith("\n") else f"{entry}\n"
     _atomic_write(path, f"{existing}{line}")
 
@@ -61,7 +99,7 @@ def upsert_index_line(
     section: str | None = None,
 ) -> None:
     path = vault / "wiki" / "index.md"
-    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    existing = _read_text(path) if path.exists() else ""
     target = f"- [[{slug}]]"
     replacement = f"{target} — {summary_line}"
 
